@@ -34,10 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let busy = CdevPin::new(busy_input_handle)?;
 
     let driver = it8951::interface::IT8951SPIInterface::new(spi, busy, rst, Delay);
-    let mut epd = it8951::IT8951::new(driver);
-    println!("Initalize Display");
-
-    epd.init(1670).unwrap();
+    let mut epd = it8951::IT8951::new(driver).init(1670).unwrap();
 
     println!(
         "Reset and initalized E-Ink Display: \n\r {:?}",
