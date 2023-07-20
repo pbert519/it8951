@@ -140,10 +140,21 @@ where
 
     /// initalize the frame buffer and clear the display to white
     pub fn reset(&mut self) -> Result<(), Error> {
+
+        self.clear_frame_buffer(0xF)?;
+        self.display(WaveformMode::Init)?;
+        Ok(())
+    }
+
+    /// set all pixel of the frame buffer to the value of raw_color
+    /// raw color must be in range 0..16
+    fn clear_frame_buffer(&mut self, raw_color: u16) -> Result<(), Error> {
         let dev_info = self.get_dev_info()?;
         let width = dev_info.panel_width;
         let height = dev_info.panel_height;
         let mem_addr = dev_info.memory_address;
+
+        let data_entry = raw_color << 12 | raw_color << 8 | raw_color << 4 | raw_color;
 
         // we need to split the data in multiple transfers to keep the buffer size small
         for w in 0..height {
@@ -161,11 +172,9 @@ where
                     area_w: width,
                     area_h: 1,
                 },
-                &vec![0xFFFF; width as usize / 4],
+                &vec![data_entry; width as usize / 4],
             )?;
         }
-
-        self.display(WaveformMode::Init)?;
         Ok(())
     }
 
@@ -444,6 +453,11 @@ where
     type Color = Gray4;
 
     type Error = Error;
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        let raw_color = color.luma() as u16;
+        self.clear_frame_buffer(raw_color)
+    }
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
