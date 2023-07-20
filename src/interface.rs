@@ -1,23 +1,35 @@
+//! Contains the controller interface
+
 use embedded_hal::{
     blocking::{delay::*, spi::Transfer, spi::Write},
     digital::v2::{InputPin, OutputPin},
 };
 
+/// Interface Error
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
+    /// A error in the spi driver
     SpiError,
+    /// A error in the gpio driver
     GPIOError,
 }
 
+/// Trait to describe the interface with the controller
+/// The controller supports different hardware interfaces like i2c, usb, spi and i80
 pub trait IT8951Interface {
+    /// active wait while the controller is busy and no new transactions should be issued
     fn wait_while_busy(&mut self) -> Result<(), Error>;
 
+    /// write a 16bit value to the controller
     fn write_data(&mut self, data: u16) -> Result<(), Error>;
 
+    /// write mutliple 16bit values to the controller
     fn write_multi_data(&mut self, data: &[u16]) -> Result<(), Error>;
 
+    /// issue a command on the controller
     fn write_command(&mut self, cmd: u16) -> Result<(), Error>;
 
+    /// issue a command with arguments on the controller
     fn write_command_with_args(&mut self, cmd: u16, args: &[u16]) -> Result<(), Error> {
         self.write_command(cmd)?;
         for arg in args {
@@ -26,13 +38,18 @@ pub trait IT8951Interface {
         Ok(())
     }
 
+    /// read a single 16 bit value
     fn read_data(&mut self) -> Result<u16, Error>;
 
+    /// read multiple 16bit values
     fn read_multi_data(&mut self, buf: &mut [u16]) -> Result<(), Error>;
 
+    /// reset the controller
     fn reset(&mut self) -> Result<(), Error>;
 }
 
+/// Implements the controller interface for the spi hardware interface
+/// Uses embedded_hal spi and gpio driver and a embedded_hal delay driver
 pub struct IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
     spi: SPI,
     busy: BUSY,
@@ -47,6 +64,7 @@ where
     RST: OutputPin,
     DELAY: DelayMs<u8>,
 {
+    /// Create a new spi controller interface
     pub fn new(
         spi: SPI,
         busy: BUSY,

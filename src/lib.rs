@@ -1,4 +1,9 @@
 #![cfg_attr(not(test), no_std)]
+#![warn(missing_docs)]
+
+//! IT8951 epaper driver for the waveshare 7.8in display
+//! The implementation is based on the IT8951 I80/SPI/I2C programming guide
+//! provided by waveshare: https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT
 
 #[macro_use]
 extern crate alloc;
@@ -12,9 +17,12 @@ mod register;
 use crate::memory_converter_settings::MemoryConverterSetting;
 use core::fmt::Debug;
 
+/// Controller Error
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
+    /// controller interface error
     Interface(interface::Error),
+    /// driver not initalized error
     NotInitalized,
 }
 impl From<interface::Error> for Error {
@@ -23,34 +31,58 @@ impl From<interface::Error> for Error {
     }
 }
 
+/// Device Info Struct
+/// Describes the connected display
 #[derive(Debug, Clone)]
 pub struct DevInfo {
+    /// width in pixel of the connected panel
     pub panel_width: u16,
+    /// height in pixel of the connected panel
     pub panel_height: u16,
+    /// start address of the frame buffer in the controller ram
     pub memory_address: u32,
+    /// Controller firmware version
     pub firmware_version: String,
+    /// LUT version
+    /// The lut describes the waveforms to modify the display content
+    /// LUT is specific for every display
     pub lut_version: String,
 }
 
+/// Describes a area on the display
 pub struct AreaImgInfo {
+    /// x position (left to right, 0 is top left corner)
     pub area_x: u16,
+    /// y position (top to bottom, 0 is top left corner)
     pub area_y: u16,
+    /// width (x-axis)
     pub area_w: u16,
+    /// height (y-axis)
     pub area_h: u16,
 }
 
 /// See https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf for full description
 pub enum WaveformMode {
-    Init = 0, // used for full erase to white, flashy, should be used if framebuffer is not up to date
-    DirectUpdate = 1, // any graytone to black or white, non flashy
-    GrayscaleClearing16 = 2, // high image quality, all graytones
-    GL16 = 3, // sparse content on white, eg. text
-    GLR16 = 4, // only in combination with with propertary image preprocessing
-    GLD16 = 5, // only in combination with with propertary image preprocessing
-    A2 = 6,   // fast, non-flash, from black/white to black/white only
-    DU4 = 7,  // fast, non flash, from any graytone to 1,6,11,16
+    /// used for full erase to white, flashy, should be used if framebuffer is not up to date
+    Init = 0,
+    /// any graytone to black or white, non flashy
+    DirectUpdate = 1,
+    /// high image quality, all graytones
+    GrayscaleClearing16 = 2,
+    ///  sparse content on white, eg. text
+    GL16 = 3,
+    ///  only in combination with with propertary image preprocessing
+    GLR16 = 4,
+    /// only in combination with with propertary image preprocessing
+    GLD16 = 5,
+    /// fast, non-flash, from black/white to black/white only
+    A2 = 6,
+    /// fast, non flash, from any graytone to 1,6,11,16
+    DU4 = 7,
 }
 
+/// IT8951 e paper driver
+/// The controller supports multiple interfaces
 pub struct IT8951<IT8951Interface> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
@@ -60,6 +92,8 @@ impl<IT8951Interface> IT8951<IT8951Interface>
 where
     IT8951Interface: interface::IT8951Interface,
 {
+    /// Creates a new controller driver object
+    /// Call init afterwards to initalize the controller
     pub fn new(interface: IT8951Interface) -> IT8951<IT8951Interface> {
         IT8951 {
             interface,
@@ -67,6 +101,8 @@ where
         }
     }
 
+    /// Initalize the driver and resets the display
+    /// VCOM should be given on your display
     pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
         self.interface.reset()?;
         self.sys_run()?;
@@ -87,6 +123,7 @@ where
         Ok(())
     }
 
+    /// Get the Device information
     pub fn get_dev_info(&self) -> Result<DevInfo, Error> {
         match &self.dev_info {
             Some(dev_info) => Ok(dev_info.clone()),
@@ -94,6 +131,8 @@ where
         }
     }
 
+    /// Increases the driver strength
+    /// Use only if the image is not clear!
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
         self.write_register(0x0038, 0x0602)?;
         Ok(())
@@ -132,6 +171,9 @@ where
 
     // load image functions ------------------------------------------------------------------------------------------
 
+    /// Loads a full frame into the controller frame buffer using the pixel preprocessor
+    /// Warning: For the most usecases, the underlying spi transfer ist not capable to transfer a complete frame
+    /// split the frame into multiple areas and use load_image_area instead
     pub fn load_image(
         &mut self,
         target_mem_addr: u32,
@@ -150,6 +192,10 @@ where
         Ok(())
     }
 
+    /// Loads pixel data into the controller frame buffer using the pixel preprocessor
+    /// Memory Address should be read from the dev_info struct
+    /// ImageSettings define the layout of the data buffer
+    /// AreaInfo describes the frame buffer area which should be updated
     pub fn load_image_area(
         &mut self,
         target_mem_addr: u32,
@@ -186,6 +232,7 @@ where
 
     // buffer functions -------------------------------------------------------------------------------------------------
 
+    /// Reads the given memory address from the controller ram into data
     pub fn memory_burst_read(
         &mut self,
         memory_address: u32,
@@ -210,6 +257,7 @@ where
         Ok(())
     }
 
+    /// Writes a buffer of u16 values to the given memory address in the controller ram
     pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u16]) -> Result<(), Error> {
         let args = [
             memory_address as u16,
@@ -228,6 +276,9 @@ where
     }
 
     // display functions ------------------------------------------------------------------------------------------------
+
+    /// Refresh a specific area of the display with the frame buffer content
+    /// A usecase specific wafeform must be selected by the user
     pub fn display_area(
         &mut self,
         area_info: &AreaImgInfo,
@@ -248,6 +299,8 @@ where
         Ok(())
     }
 
+    /// Refresh a specific area of the display from a dedicated frame buffer
+    /// A usecase specific wafeform must be selected by the user
     pub fn display_area_buf(
         &mut self,
         area_info: &AreaImgInfo,
@@ -271,6 +324,8 @@ where
         Ok(())
     }
 
+    /// Refresh the full E-Ink display with the frame buffer content
+    /// A usecase specific wafeform must be selected by the user
     pub fn display(&mut self, mode: WaveformMode) -> Result<(), Error> {
         let dev_info = self.get_dev_info()?;
         let width = dev_info.panel_width;
@@ -295,16 +350,22 @@ where
         Ok(())
     }
 
-    fn sys_run(&mut self) -> Result<(), Error> {
+    /// Activate active power mode
+    /// This is the normal operation power mode
+    pub fn sys_run(&mut self) -> Result<(), Error> {
         self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
         Ok(())
     }
 
+    /// Activate sleep power mode
+    /// All clocks, pll, osc and the panel are off, but the ram is refreshed
     pub fn sleep(&mut self) -> Result<(), Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
         Ok(())
     }
 
+    /// Activate standby power mode
+    /// Clocks are gated off, but pll, osc, panel power and ram is active
     pub fn standby(&mut self) -> Result<(), Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
         Ok(())
