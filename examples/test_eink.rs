@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut spi = Spidev::open("/dev/spidev0.0")?;
     let spi_options = SpidevOptions::new()
         .bits_per_word(8)
-        .max_speed_hz(1_000_000)
+        .max_speed_hz(12_000_000)
         .mode(SpiModeFlags::SPI_MODE_0)
         .build();
     spi.configure(&spi_options)?;
@@ -40,23 +40,37 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     epd.init(1670).unwrap();
 
-    println!("Initalized E-Ink Display: \n\r {:?}", epd.get_dev_info());
-
-    // ToDo: Fails with not yet implemented
-    // clear screen
-    // epd.clear(Gray4::WHITE)?;
+    println!(
+        "Reset and initalized E-Ink Display: \n\r {:?}",
+        epd.get_dev_info()
+    );
 
     // Draw a filled square
-    // Rectangle::new(Point::new(50, 350), Size::new(200, 200))
-    //    .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
-    //    .draw(&mut epd)?;
+    Rectangle::new(Point::new(50, 350), Size::new(20, 20))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
+        .draw(&mut epd)
+        .unwrap();
 
-    epd.clear(Gray4::WHITE).expect("Error clearing display");
+    Rectangle::new(Point::new(0, 1000), Size::new(200, 200))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::new(8)))
+        .draw(&mut epd)
+        .unwrap();
 
-    let mut buf = [0x0; 100];
-    let mem = epd.get_dev_info().as_ref().unwrap().memory_address;
-    epd.memory_burst_read(mem, &mut buf).unwrap();
-    println!("{:?}", buf);
+    // Draw centered text.
+    let text = "IT8951 Driver Example";
+    embedded_graphics::text::Text::with_alignment(
+        text,
+        epd.bounding_box().center() + Point::new(0, 15),
+        embedded_graphics::mono_font::MonoTextStyle::new(
+            &embedded_graphics::mono_font::iso_8859_1::FONT_9X18_BOLD,
+            Gray4::new(11),
+        ),
+        embedded_graphics::text::Alignment::Center,
+    )
+    .draw(&mut epd)
+    .unwrap();
+
+    epd.display(it8951::WaveformMode::GL16).unwrap();
 
     epd.sleep().unwrap();
 

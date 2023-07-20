@@ -70,7 +70,7 @@ where
     pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
         self.interface.reset()?;
         self.sys_run()?;
- 
+
         let dev_info = self.get_system_info()?;
 
         // Enable Pack Write
@@ -81,6 +81,8 @@ where
         }
 
         self.dev_info = Some(dev_info);
+
+        self.reset()?;
 
         Ok(())
     }
@@ -94,6 +96,37 @@ where
 
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
         self.write_register(0x0038, 0x0602)?;
+        Ok(())
+    }
+
+    /// initalize the frame buffer and clear the display to white
+    pub fn reset(&mut self) -> Result<(), Error> {
+        let dev_info = self.get_dev_info()?;
+        let width = dev_info.panel_width;
+        let height = dev_info.panel_height;
+        let mem_addr = dev_info.memory_address;
+
+        // we need to split the data in multiple transfers to keep the buffer size small
+        for w in 0..height {
+            self.load_image_area(
+                mem_addr,
+                MemoryConverterSetting {
+                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
+                    bit_per_pixel:
+                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
+                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
+                },
+                &AreaImgInfo {
+                    area_x: 0,
+                    area_y: w,
+                    area_w: width,
+                    area_h: 1,
+                },
+                &vec![0xFFFF; width as usize / 4],
+            )?;
+        }
+
+        self.display(WaveformMode::Init)?;
         Ok(())
     }
 
@@ -238,6 +271,23 @@ where
         Ok(())
     }
 
+    pub fn display(&mut self, mode: WaveformMode) -> Result<(), Error> {
+        let dev_info = self.get_dev_info()?;
+        let width = dev_info.panel_width;
+        let height = dev_info.panel_height;
+
+        self.display_area(
+            &AreaImgInfo {
+                area_x: 0,
+                area_y: 0,
+                area_w: width,
+                area_h: height,
+            },
+            mode,
+        )?;
+        Ok(())
+    }
+
     // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
@@ -334,76 +384,6 @@ where
 
     type Error = Error;
 
-    // fetch area from it8951 frame buffer,
-    // overwrites given pixels
-    // transmit area
-    // How to areas to big for the internal memory? Split into areas? How to handle "wrong" order of pixels?
-    // full refresh
-    fn fill_contiguous<I>(
-        &mut self,
-        _area: &embedded_graphics::primitives::Rectangle,
-        _colors: I,
-    ) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        todo!()
-    }
-
-    // create area locally and send it to the devices
-    // split into multiple buffers if to big for ram
-    // raspi spi buffer size is 4096kb
-    // refresh full frame
-    fn fill_solid(
-        &mut self,
-        _area: &embedded_graphics::primitives::Rectangle,
-        _color: Self::Color,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let dev_info = self.get_dev_info()?;
-        let width = dev_info.panel_width;
-        let height = dev_info.panel_height;
-        let mem_addr = dev_info.memory_address;
-        let pixel_data_u8: u8 = color.luma() | color.luma() << 4;
-        let pixel_data_u16 = (pixel_data_u8 as u16) << 8 | pixel_data_u8 as u16;
-
-        // we need to split the data in multiple transfers to keep the buffer size small
-        for w in 0..height {
-            self.load_image_area(
-                mem_addr,
-                MemoryConverterSetting {
-                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                    bit_per_pixel:
-                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-                },
-                &AreaImgInfo {
-                    area_x: 0,
-                    area_y: w,
-                    area_w: width,
-                    area_h: 1,
-                },
-                &vec![pixel_data_u16; width as usize / 4],
-            )?;
-        }
-
-        self.display_area(
-            &AreaImgInfo {
-                area_x: 0,
-                area_y: 0,
-                area_w: width,
-                area_h: height,
-            },
-            WaveformMode::Init,
-        )?;
-        Ok(())
-    }
-
-    // it is possible to set only on pixel by using load image area with a area size of 1
-    // however we still have to send 2 bytes, the other 3 pixels are ignored
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
@@ -411,9 +391,27 @@ where
         let dev_info = self.get_dev_info()?;
         let width = dev_info.panel_width as i32;
         let height = dev_info.panel_height as i32;
-        for Pixel(coord, _color) in pixels.into_iter() {
+        for Pixel(coord, color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
-                todo!("write pixel")
+                let data: u16 = (color.luma() as u16) << ((coord.x % 4) * 4);
+
+                self.load_image_area(
+                    dev_info.memory_address,
+                    MemoryConverterSetting {
+                        endianness:
+                            memory_converter_settings::MemoryConverterEndianness::LittleEndian,
+                        bit_per_pixel:
+                            memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
+                        rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
+                    },
+                    &AreaImgInfo {
+                        area_x: coord.x as u16,
+                        area_y: coord.y as u16,
+                        area_w: 1,
+                        area_h: 1,
+                    },
+                    &[data],
+                )?;
             }
         }
         Ok(())
