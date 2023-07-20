@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 embedded-hal = {version = "0.2.7", features=["unproven"]}
-embedded-graphics = "0.7.1"
+embedded-graphics = "0.8.0"
 
 [dev-dependencies]
 linux-embedded-hal = "0.3.2"
