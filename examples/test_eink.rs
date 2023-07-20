@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut spi = Spidev::open("/dev/spidev0.0")?;
     let spi_options = SpidevOptions::new()
         .bits_per_word(8)
-        .max_speed_hz(12_000_000)
+        .max_speed_hz(1_000_000)
         .mode(SpiModeFlags::SPI_MODE_0)
         .build();
     spi.configure(&spi_options)?;
@@ -27,7 +27,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let busy_input_handle = busy_input.request(LineRequestFlags::INPUT, 0, "meeting-room")?;
     let busy = CdevPin::new(busy_input_handle)?;
 
-    let mut epd = it8951::IT8951::new(spi, busy, rst, Delay);
+    let driver = it8951::comm::IT8951SPIInterface::new(spi, busy, rst, Delay);
+    let mut epd = it8951::IT8951::new(driver);
     println!("Initalize Display");
 
     epd.init(1670).unwrap();

@@ -149,7 +149,7 @@ where
         Ok(())
     }
 
-    pub fn enhance_driving_capability(&mut self) -> Result<(), Error>{
+    pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
         self.write_register(0x0038, 0x0602)?;
         Ok(())
     }

@@ -10,12 +10,7 @@ pub enum Error {
 }
 
 pub trait IT8951Interface {
-    fn wait_while_busy(&mut self) -> Result<(), Error> {
-        while self.is_busy()? {}
-        Ok(())
-    }
-
-    fn is_busy(&mut self) -> Result<bool, Error>;
+    fn wait_while_busy(&mut self) -> Result<(), Error>;
 
     fn write_data(&mut self, data: u16) -> Result<(), Error>;
 
@@ -37,6 +32,28 @@ pub struct IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
     delay: DELAY,
 }
 
+impl<SPI, BUSY, RST, DELAY> IT8951SPIInterface<SPI, BUSY, RST, DELAY>
+where
+    SPI: Write<u8> + Transfer<u8>,
+    BUSY: InputPin,
+    RST: OutputPin,
+    DELAY: DelayMs<u8>,
+{
+    pub fn new(
+        spi: SPI,
+        busy: BUSY,
+        rst: RST,
+        delay: DELAY,
+    ) -> IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
+        IT8951SPIInterface {
+            spi,
+            busy,
+            rst,
+            delay,
+        }
+    }
+}
+
 impl<SPI, BUSY, RST, DELAY> IT8951Interface for IT8951SPIInterface<SPI, BUSY, RST, DELAY>
 where
     SPI: Write<u8> + Transfer<u8>,
@@ -44,11 +61,9 @@ where
     RST: OutputPin,
     DELAY: DelayMs<u8>,
 {
-    fn is_busy(&mut self) -> Result<bool, Error> {
-        match self.busy.is_low() {
-            Ok(value) => Ok(value),
-            Err(_) => Err(Error::GPIOError),
-        }
+    fn wait_while_busy(&mut self) -> Result<(), Error> {
+        while self.busy.is_low().unwrap_or(true) {}
+        Ok(())
     }
 
     fn write_data(&mut self, data: u16) -> Result<(), Error> {
@@ -115,6 +130,7 @@ where
     }
 
     fn read_multi_data(&mut self, buf: &mut [u16]) -> Result<(), Error> {
+        self.wait_while_busy()?;
         // create a u8 buffer
         let mut read_buf = vec![0u8; buf.len()*2 /* nbr of data bytes */ + 2 /*dummby bytes */ + 2 /* read preamble */];
 
