@@ -1,4 +1,4 @@
-# Driver for IT8951 E-Paper driver
+# Driver for IT8951 E-Paper display
 
 This crate is mainly developed for the waveshare 7.8" epaper display using spi:
 https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT
