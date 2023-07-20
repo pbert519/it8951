@@ -7,6 +7,8 @@
 
 #[macro_use]
 extern crate alloc;
+use core::marker::PhantomData;
+
 use alloc::string::String;
 
 mod command;
@@ -23,8 +25,6 @@ use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 pub enum Error {
     /// controller interface error
     Interface(interface::Error),
-    /// driver not initalized error
-    NotInitalized,
 }
 impl From<interface::Error> for Error {
     fn from(e: interface::Error) -> Self {
@@ -83,54 +83,67 @@ pub enum WaveformMode {
     DU4 = 7,
 }
 
+/// Normal Operation
+pub struct Run;
+/// The device is either in sleep or standby mode:
+/// Sleep: All clocks, pll, osc and the panel are off, but the ram is refreshed
+/// Standby: Clocks are gated off, but pll, osc, panel power and ram is active
+pub struct PowerDown;
+/// Not initalised driver after a power cycle
+pub struct Off;
+
 /// IT8951 e paper driver
 /// The controller supports multiple interfaces
-pub struct IT8951<IT8951Interface> {
+pub struct IT8951<IT8951Interface, State> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
+    marker: core::marker::PhantomData<State>,
 }
 
-impl<IT8951Interface> IT8951<IT8951Interface>
-where
-    IT8951Interface: interface::IT8951Interface,
-{
+impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    pub fn new(interface: IT8951Interface) -> IT8951<IT8951Interface> {
+    pub fn new(interface: IT8951Interface) -> Self {
         IT8951 {
             interface,
             dev_info: None,
+            marker: PhantomData {},
         }
     }
 
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
-    pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
+    pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.reset()?;
-        self.sys_run()?;
 
-        let dev_info = self.get_system_info()?;
+        let mut it8951 = IT8951::<IT8951Interface, PowerDown> {
+            interface: self.interface,
+            dev_info: self.dev_info,
+            marker: PhantomData {},
+        }
+        .sys_run()?;
+
+        let dev_info = it8951.get_system_info()?;
 
         // Enable Pack Write
-        self.write_register(register::I80CPCR, 0x0001)?;
+        it8951.write_register(register::I80CPCR, 0x0001)?;
 
-        if vcom != self.get_vcom()? {
-            self.set_vcom(vcom)?;
+        if vcom != it8951.get_vcom()? {
+            it8951.set_vcom(vcom)?;
         }
 
-        self.dev_info = Some(dev_info);
+        it8951.dev_info = Some(dev_info);
 
-        self.reset()?;
+        it8951.reset()?;
 
-        Ok(())
+        Ok(it8951)
     }
+}
 
+impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Get the Device information
-    pub fn get_dev_info(&self) -> Result<DevInfo, Error> {
-        match &self.dev_info {
-            Some(dev_info) => Ok(dev_info.clone()),
-            None => Err(Error::NotInitalized),
-        }
+    pub fn get_dev_info(&self) -> DevInfo {
+        self.dev_info.clone().unwrap()
     }
 
     /// Increases the driver strength
@@ -150,7 +163,7 @@ where
     /// set all pixel of the frame buffer to the value of raw_color
     /// raw color must be in range 0..16
     fn clear_frame_buffer(&mut self, raw_color: u16) -> Result<(), Error> {
-        let dev_info = self.get_dev_info()?;
+        let dev_info = self.get_dev_info();
         let width = dev_info.panel_width;
         let height = dev_info.panel_height;
         let mem_addr = dev_info.memory_address;
@@ -337,7 +350,7 @@ where
     /// Refresh the full E-Ink display with the frame buffer content
     /// A usecase specific wafeform must be selected by the user
     pub fn display(&mut self, mode: WaveformMode) -> Result<(), Error> {
-        let dev_info = self.get_dev_info()?;
+        let dev_info = self.get_dev_info();
         let width = dev_info.panel_width;
         let height = dev_info.panel_height;
 
@@ -360,25 +373,26 @@ where
         Ok(())
     }
 
-    /// Activate active power mode
-    /// This is the normal operation power mode
-    pub fn sys_run(&mut self) -> Result<(), Error> {
-        self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
-        Ok(())
-    }
-
     /// Activate sleep power mode
     /// All clocks, pll, osc and the panel are off, but the ram is refreshed
-    pub fn sleep(&mut self) -> Result<(), Error> {
+    pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
-        Ok(())
+        Ok(IT8951 {
+            interface: self.interface,
+            dev_info: self.dev_info,
+            marker: PhantomData {},
+        })
     }
 
     /// Activate standby power mode
     /// Clocks are gated off, but pll, osc, panel power and ram is active
-    pub fn standby(&mut self) -> Result<(), Error> {
+    pub fn standby(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
-        Ok(())
+        Ok(IT8951 {
+            interface: self.interface,
+            dev_info: self.dev_info,
+            marker: PhantomData {},
+        })
     }
 
     fn get_system_info(&mut self) -> Result<DevInfo, Error> {
@@ -443,14 +457,24 @@ where
     }
 }
 
+impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerDown> {
+    /// Activate active power mode
+    /// This is the normal operation power mode
+    pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, Run>, Error> {
+        self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
+        Ok(IT8951 {
+            interface: self.interface,
+            dev_info: self.dev_info,
+            marker: PhantomData {},
+        })
+    }
+}
+
 // --------------------------- embedded graphics support --------------------------------------
 
 use embedded_graphics::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
-impl<IT8951Interface> DrawTarget for IT8951<IT8951Interface>
-where
-    IT8951Interface: interface::IT8951Interface,
-{
+impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951Interface, Run> {
     type Color = Gray4;
 
     type Error = Error;
@@ -469,7 +493,7 @@ where
         let pixel = PixelSerializer::new(area.intersection(&self.bounding_box()), iter);
 
         for (area_img_info, buffer) in pixel {
-            let dev_info = self.get_dev_info()?;
+            let dev_info = self.get_dev_info();
             self.load_image_area(
                 dev_info.memory_address,
                 MemoryConverterSetting {
@@ -489,7 +513,7 @@ where
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
     {
-        let dev_info = self.get_dev_info()?;
+        let dev_info = self.get_dev_info();
         let width = dev_info.panel_width as i32;
         let height = dev_info.panel_height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
@@ -519,9 +543,8 @@ where
     }
 }
 
-impl<IT8951Interface> OriginDimensions for IT8951<IT8951Interface>
-where
-    IT8951Interface: interface::IT8951Interface,
+impl<IT8951Interface: interface::IT8951Interface> OriginDimensions
+    for IT8951<IT8951Interface, Run>
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
