@@ -138,6 +138,22 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         Ok(it8951)
     }
+
+    /// Create a new Driver for are already active and initalized driver
+    /// This can be usefull if the device was still powered on, but the uC restarts.
+    /// VCOM should be given on your display
+    pub fn attach(interface: IT8951Interface) -> Result<IT8951<IT8951Interface, Run>, Error> {
+        let mut it8951 = IT8951 {
+            interface,
+            dev_info: None,
+            marker: PhantomData {},
+        }.sys_run()?;
+        
+        it8951.dev_info = Some(it8951.get_system_info()?);
+
+        Ok(it8951)
+    }
+
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
