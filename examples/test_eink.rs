@@ -1,4 +1,3 @@
-pub mod it8951;
 
 use linux_embedded_hal::gpio_cdev::{Chip, LineRequestFlags};
 use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
