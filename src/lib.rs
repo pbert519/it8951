@@ -1,10 +1,11 @@
 #![cfg_attr(not(test), no_std)]
 
+#[macro_use]
+extern crate alloc;
+
+pub mod comm;
+
 use core::fmt::Debug;
-use embedded_hal::{
-    blocking::{delay::*, spi::Transfer, spi::Write},
-    digital::v2::{InputPin, OutputPin},
-};
 
 // ---- IT8951 Registers defines -----------------------------------------------------------------
 
@@ -56,15 +57,19 @@ const IT8951_TCON_LD_IMG_AREA: u16 = 0x0021;
 const IT8951_TCON_LD_IMG_END: u16 = 0x0022;
 
 //I80 User defined command code
-const _USDEF_I80_CMD_DPY_AREA: u16 = 0x0034;
+const USDEF_I80_CMD_DPY_AREA: u16 = 0x0034;
 const USDEF_I80_CMD_GET_DEV_INFO: u16 = 0x0302;
-const _USDEF_I80_CMD_DPY_BUF_AREA: u16 = 0x0037;
+const USDEF_I80_CMD_DPY_BUF_AREA: u16 = 0x0037;
 const USDEF_I80_CMD_VCOM: u16 = 0x0039;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    SpiError,
-    GPIOError,
+    Interface(comm::Error),
+}
+impl From<comm::Error> for Error {
+    fn from(e: comm::Error) -> Self {
+        Error::Interface(e)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -72,8 +77,8 @@ pub struct DevInfo {
     pub panel_width: u16,
     pub panel_height: u16,
     pub memory_address: u32,
-    pub firmware_version: [u8; 16],
-    pub lut_version: [u8; 16],
+    pub firmware_version: [u16; 8],
+    pub lut_version: [u16; 8],
 }
 
 struct LoadImgInfo {
@@ -91,34 +96,25 @@ struct AreaImgInfo {
     area_h: u16,
 }
 
-pub struct IT8951<SPI, BUSY, RST, DELAY> {
-    spi: SPI,
-    busy: BUSY,
-    rst: RST,
-    delay: DELAY,
+pub struct IT8951<IT8951Interface> {
+    interface: IT8951Interface,
     dev_info: Option<DevInfo>,
 }
 
-impl<SPI, BUSY, RST, DELAY> IT8951<SPI, BUSY, RST, DELAY>
+impl<IT8951Interface> IT8951<IT8951Interface>
 where
-    SPI: Write<u8> + Transfer<u8>,
-    BUSY: InputPin,
-    RST: OutputPin,
-    DELAY: DelayMs<u8>,
+    IT8951Interface: comm::IT8951Interface,
 {
-    pub fn new(spi: SPI, busy: BUSY, rst: RST, delay: DELAY) -> IT8951<SPI, BUSY, RST, DELAY> {
+    pub fn new(interface: IT8951Interface) -> IT8951<IT8951Interface> {
         IT8951 {
-            spi,
-            busy,
-            rst,
-            delay,
+            interface,
             dev_info: None,
         }
     }
 
     pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
-        self.reset()?;
-        self.write_command(IT8951_TCON_SYS_RUN)?;
+        self.interface.reset()?;
+        self.interface.write_command(IT8951_TCON_SYS_RUN)?;
 
         let dev_info = self.get_system_info()?;
 
@@ -138,39 +134,27 @@ where
         &self.dev_info
     }
 
-    pub fn reset(&mut self) -> Result<(), Error> {
-        if self.rst.set_high().is_err() {
-            return Err(Error::GPIOError);
-        }
-        self.delay.delay_ms(200);
-        if self.rst.set_low().is_err() {
-            return Err(Error::GPIOError);
-        }
-        self.delay.delay_ms(20);
-        if self.rst.set_high().is_err() {
-            return Err(Error::GPIOError);
-        }
-        self.delay.delay_ms(200);
-        Ok(())
-    }
-
     pub fn clear_refresh(&mut self) {
         //let dev_info = self.dev_info.as_ref().unwrap();
         todo!();
     }
 
     pub fn sleep(&mut self) -> Result<(), Error> {
-        self.write_command(IT8951_TCON_SLEEP)?;
+        self.interface.write_command(IT8951_TCON_SLEEP)?;
         Ok(())
     }
 
-    #[deprecated]
     pub fn standby(&mut self) -> Result<(), Error> {
-        self.write_command(IT8951_TCON_STANDBY)?;
+        self.interface.write_command(IT8951_TCON_STANDBY)?;
         Ok(())
     }
 
-    // set display functions ------------------------------------------------------------------------------------------
+    pub fn enhance_driving_capability(&mut self) -> Result<(), Error>{
+        self.write_register(0x0038, 0x0602)?;
+        Ok(())
+    }
+
+    // load image functions ------------------------------------------------------------------------------------------
 
     fn set_target_memory_addr(&mut self, target_mem_addr: u32) -> Result<(), Error> {
         self.write_register(LISAR + 2, (target_mem_addr >> 16) as u16)?;
@@ -180,15 +164,19 @@ where
 
     fn load_image_start(&mut self, image_info: &LoadImgInfo) -> Result<(), Error> {
         let arg0: u16 =
-        (image_info.endian_type << 8) | (image_info.pixel_format << 4) | image_info.rotate;
+            (image_info.endian_type << 8) | (image_info.pixel_format << 4) | image_info.rotate;
 
-        self.write_command(IT8951_TCON_LD_IMG)?;
-        self.write_data(arg0)?;
+        self.interface.write_command(IT8951_TCON_LD_IMG)?;
+        self.interface.write_data(arg0)?;
 
         Ok(())
     }
 
-    fn load_img_area_start(&mut self, image_info: &LoadImgInfo, area_info: &AreaImgInfo) -> Result<(), Error>{
+    fn load_img_area_start(
+        &mut self,
+        image_info: &LoadImgInfo,
+        area_info: &AreaImgInfo,
+    ) -> Result<(), Error> {
         let arg0: u16 =
             (image_info.endian_type << 8) | (image_info.pixel_format << 4) | image_info.rotate;
 
@@ -205,12 +193,15 @@ where
     }
 
     fn load_img_end(&mut self) -> Result<(), Error> {
-        self.write_command(IT8951_TCON_LD_IMG_END)?;
+        self.interface.write_command(IT8951_TCON_LD_IMG_END)?;
         Ok(())
     }
 
-    fn host_area_packed_pixel_write_4bp(&mut self,  image_info: &LoadImgInfo, area_info: &AreaImgInfo) -> Result<(), Error>{
-        
+    fn host_area_packed_pixel_write_4bp(
+        &mut self,
+        image_info: &LoadImgInfo,
+        area_info: &AreaImgInfo,
+    ) -> Result<(), Error> {
         self.set_target_memory_addr(image_info.target_memory_addr)?;
         self.load_img_area_start(image_info, area_info)?;
 
@@ -224,8 +215,53 @@ where
     pub fn refresh_4bp(&mut self) -> Result<(), Error> {
         self.wait_for_display_ready()?;
 
-        todo!();
+        let image_info = LoadImgInfo {
+            endian_type: 0,
+            pixel_format: 0,
+            rotate: 0,
+            source_buffer_addr: 0,
+            target_memory_addr: 0,
+        };
+        let area_info = AreaImgInfo {
+            area_x: 0,
+            area_y: 0,
+            area_w: 10,
+            area_h: 10,
+        };
 
+        self.host_area_packed_pixel_write_4bp(&image_info, &area_info)?;
+
+        Ok(())
+    }
+
+    // display functions ------------------------------------------------------------------------------------------------
+    pub fn display_area(&mut self, x: u16, y: u16, w: u16, h: u16, mode: u16) -> Result<(), Error> {
+        let args = [x, y, w, h, mode];
+
+        self.write_multi_args(USDEF_I80_CMD_DPY_AREA, &args)?;
+        Ok(())
+    }
+
+    pub fn display_area_buf(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        mode: u16,
+        target_mem_addr: u32,
+    ) -> Result<(), Error> {
+        let args = [
+            x,
+            y,
+            w,
+            h,
+            mode,
+            target_mem_addr as u16,
+            (target_mem_addr >> 16) as u16,
+        ];
+
+        self.write_multi_args(USDEF_I80_CMD_DPY_BUF_AREA, &args)?;
         Ok(())
     }
 
@@ -237,108 +273,57 @@ where
     }
 
     fn get_system_info(&mut self) -> Result<DevInfo, Error> {
-        self.write_command(USDEF_I80_CMD_GET_DEV_INFO)?;
+        self.interface.write_command(USDEF_I80_CMD_GET_DEV_INFO)?;
 
-        self.wait_while_busy();
+        self.interface.wait_while_busy()?;
 
-        // 40 bytes payload + 2 dummby response bytes + 2 bytes write preamble
-        let mut buf = [0x00; 44];
-        buf[0] = 0x10;
-        buf[1] = 0x00;
-        if self.spi.transfer(&mut buf).is_err() {
-            return Err(Error::SpiError);
-        }
+        // 40 bytes payload
+        let mut buf = [0x0000; 20];
+        self.interface.read_multi_data(&mut buf)?;
 
         Ok(DevInfo {
-            panel_width: u16::from_be_bytes([buf[4], buf[5]]),
-            panel_height: u16::from_be_bytes([buf[6], buf[7]]),
-            memory_address: u32::from_be_bytes([buf[10], buf[11], buf[8], buf[9]]),
-            firmware_version: buf[12..28].try_into().unwrap(),
-            lut_version: buf[28..44].try_into().unwrap(),
+            panel_width: buf[0],
+            panel_height: buf[1],
+            memory_address: ((buf[2] as u32) << 16) | (buf[3] as u32),
+            firmware_version: buf[4..12].try_into().unwrap(),
+            lut_version: buf[12..20].try_into().unwrap(),
         })
     }
 
     fn get_vcom(&mut self) -> Result<u16, Error> {
-        self.write_command(USDEF_I80_CMD_VCOM)?;
-        self.write_data(0x0000)?;
-        self.read_data()
+        self.interface.write_command(USDEF_I80_CMD_VCOM)?;
+        self.interface.write_data(0x0000)?;
+        let vcom = self.interface.read_data()?;
+        Ok(vcom)
     }
 
     fn set_vcom(&mut self, vcom: u16) -> Result<(), Error> {
-        self.write_command(USDEF_I80_CMD_VCOM)?;
-        self.write_data(0x0001)?;
-        self.write_data(vcom)?;
+        self.interface.write_command(USDEF_I80_CMD_VCOM)?;
+        self.interface.write_data(0x0001)?;
+        self.interface.write_data(vcom)?;
         Ok(())
     }
 
     fn read_register(&mut self, reg: u16) -> Result<u16, Error> {
-        self.write_command(_IT8951_TCON_REG_RD)?;
-        self.write_data(reg)?;
-        self.read_data()
+        self.interface.write_command(_IT8951_TCON_REG_RD)?;
+        self.interface.write_data(reg)?;
+        let data = self.interface.read_data()?;
+        Ok(data)
     }
 
     fn write_register(&mut self, reg: u16, data: u16) -> Result<(), Error> {
-        self.write_command(IT8951_TCON_REG_WR)?;
-        self.write_data(reg)?;
-        self.write_data(data)?;
-        Ok(())
-    }
-
-    fn write_data(&mut self, data: u16) -> Result<(), Error> {
-        self.wait_while_busy();
-
-        // Write Data:
-        // 0x0000 -> Prefix for a Command
-        // data; u16 -> 16bit data to write
-        let buf = [0x00, 0x00, (data >> 8) as u8, data as u8];
-
-        if self.spi.write(&buf).is_err() {
-            return Err(Error::SpiError);
-        }
-
-        Ok(())
-    }
-
-    fn write_command(&mut self, cmd: u16) -> Result<(), Error> {
-        self.wait_while_busy();
-
-        // Write Command:
-        // 0x6000 -> Prefix for a Command
-        // cmd; u16 -> 16bit Command code
-        let buf = [0x60, 0x00, (cmd >> 8) as u8, cmd as u8];
-
-        if self.spi.write(&buf).is_err() {
-            return Err(Error::SpiError);
-        }
-
+        self.interface.write_command(IT8951_TCON_REG_WR)?;
+        self.interface.write_data(reg)?;
+        self.interface.write_data(data)?;
         Ok(())
     }
 
     fn write_multi_args(&mut self, cmd: u16, args: &[u16]) -> Result<(), Error> {
-        self.write_command(cmd)?;
+        self.interface.write_command(cmd)?;
         for arg in args {
-            self.write_data(*arg)?;
+            self.interface.write_data(*arg)?;
         }
         Ok(())
-    }
-
-    fn read_data(&mut self) -> Result<u16, Error> {
-        self.wait_while_busy();
-
-        // Read Data
-        // 0x1000 -> Prefix for Read Data
-        let mut buf = [0x10, 0x00, 0x00, 0x00, 0x00, 0x00];
-        if self.spi.transfer(&mut buf).is_err() {
-            return Err(Error::SpiError);
-        }
-        // we skip the first 2 bytes -> shifted out while transfer the prefix
-        // the next two bytes are only dummies and are skipped to
-        // only the last two bytes are the expected data and are stored
-        Ok(u16::from_be_bytes([buf[4], buf[5]]))
-    }
-
-    fn wait_while_busy(&mut self) {
-        while self.busy.is_low().unwrap_or(true) {}
     }
 }
 
@@ -346,17 +331,50 @@ where
 
 use embedded_graphics::{pixelcolor::Gray4, prelude::*};
 
-impl<SPI, BUSY, RST, DELAY> DrawTarget for IT8951<SPI, BUSY, RST, DELAY>
+impl<IT8951Interface> DrawTarget for IT8951<IT8951Interface>
 where
-    SPI: Write<u8> + Transfer<u8>,
-    BUSY: InputPin,
-    RST: OutputPin,
-    DELAY: DelayMs<u8>,
+    IT8951Interface: comm::IT8951Interface,
 {
     type Color = Gray4;
 
     type Error = core::convert::Infallible;
 
+    // fetch area from it8951 frame buffer,
+    // overwrites given pixels
+    // transmit area
+    // How to areas to big for the internal memory? Split into areas? How to handle "wrong" order of pixels?
+    // full refresh
+    fn fill_contiguous<I>(
+        &mut self,
+        area: &embedded_graphics::primitives::Rectangle,
+        colors: I,
+    ) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        todo!()
+    }
+
+    // create area locally and send it to the devices
+    // split into multiple buffers if to big for ram
+    // refresh full frame
+    fn fill_solid(
+        &mut self,
+        area: &embedded_graphics::primitives::Rectangle,
+        color: Self::Color,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    // Fetch frame buffer for every pixel,
+    // modify it
+    // and upload it again
+    // after all pixels are processed, refresh full frame
+    // do we even have a accessible frame buffer?!
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
@@ -364,7 +382,7 @@ where
         let dev_info = self.dev_info.as_ref().unwrap();
         let width = dev_info.panel_width as i32;
         let height = dev_info.panel_height as i32;
-        for Pixel(coord, color) in pixels.into_iter() {
+        for Pixel(coord, _color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
                 todo!("write pixel")
             }
@@ -373,12 +391,9 @@ where
     }
 }
 
-impl<SPI, BUSY, RST, DELAY> OriginDimensions for IT8951<SPI, BUSY, RST, DELAY>
+impl<IT8951Interface> OriginDimensions for IT8951<IT8951Interface>
 where
-    SPI: Write<u8> + Transfer<u8>,
-    BUSY: InputPin,
-    RST: OutputPin,
-    DELAY: DelayMs<u8>,
+    IT8951Interface: comm::IT8951Interface,
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
