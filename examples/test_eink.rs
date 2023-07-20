@@ -1,3 +1,4 @@
+use it8951::AreaImgInfo;
 use linux_embedded_hal::gpio_cdev::{Chip, LineRequestFlags};
 use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
 use linux_embedded_hal::{CdevPin, Delay, Spidev};
@@ -6,9 +7,7 @@ use std::error::Error;
 use embedded_graphics::{
     pixelcolor::Gray4,
     prelude::*,
-    primitives::{
-        PrimitiveStyle, Rectangle, 
-    },
+    primitives::{PrimitiveStyle, Rectangle},
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -35,7 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let busy_input_handle = busy_input.request(LineRequestFlags::INPUT, 0, "meeting-room")?;
     let busy = CdevPin::new(busy_input_handle)?;
 
-    let driver = it8951::comm::IT8951SPIInterface::new(spi, busy, rst, Delay);
+    let driver = it8951::interface::IT8951SPIInterface::new(spi, busy, rst, Delay);
     let mut epd = it8951::IT8951::new(driver);
     println!("Initalize Display");
 
@@ -51,6 +50,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Rectangle::new(Point::new(50, 350), Size::new(200, 200))
     //    .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
     //    .draw(&mut epd)?;
+
+    epd.clear(Gray4::WHITE).expect("Error clearing display");
+
+    let mut buf = [0x0; 100];
+    let mem = epd.get_dev_info().as_ref().unwrap().memory_address;
+    epd.memory_burst_read(mem, &mut buf).unwrap();
+    println!("{:?}", buf);
 
     epd.sleep().unwrap();
 

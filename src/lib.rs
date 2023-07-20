@@ -2,6 +2,7 @@
 
 #[macro_use]
 extern crate alloc;
+use alloc::string::String;
 
 mod command;
 pub mod interface;
@@ -14,6 +15,7 @@ use core::fmt::Debug;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     Interface(interface::Error),
+    NotInitalized,
 }
 impl From<interface::Error> for Error {
     fn from(e: interface::Error) -> Self {
@@ -26,15 +28,15 @@ pub struct DevInfo {
     pub panel_width: u16,
     pub panel_height: u16,
     pub memory_address: u32,
-    pub firmware_version: [u16; 8],
-    pub lut_version: [u16; 8],
+    pub firmware_version: String,
+    pub lut_version: String,
 }
 
 pub struct AreaImgInfo {
-    area_x: u16,
-    area_y: u16,
-    area_w: u16,
-    area_h: u16,
+    pub area_x: u16,
+    pub area_y: u16,
+    pub area_w: u16,
+    pub area_h: u16,
 }
 
 /// See https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf for full description
@@ -68,7 +70,7 @@ where
     pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
         self.interface.reset()?;
         self.sys_run()?;
-
+ 
         let dev_info = self.get_system_info()?;
 
         // Enable Pack Write
@@ -83,39 +85,11 @@ where
         Ok(())
     }
 
-    pub fn get_dev_info(&self) -> &Option<DevInfo> {
-        &self.dev_info
-    }
-
-    // ToDo: this function is only for testing purposes
-    pub fn clear_refresh(&mut self) {
-        let dev_info = self.dev_info.as_ref().unwrap();
-        let pixels: usize = dev_info.panel_height as usize * dev_info.panel_width as usize;
-        let width = dev_info.panel_width;
-        let height = dev_info.panel_height;
-        let mem_addr = dev_info.memory_address;
-
-        self.load_image(
-            mem_addr,
-            MemoryConverterSetting {
-                endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                bit_per_pixel: memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-            },
-            &vec![0x00; pixels / 2],
-        )
-        .expect("Load image error");
-
-        self.display_area(
-            &AreaImgInfo {
-                area_x: 0,
-                area_y: 0,
-                area_w: width,
-                area_h: height,
-            },
-            WaveformMode::Init,
-        )
-        .expect("Display image error");
+    pub fn get_dev_info(&self) -> Result<DevInfo, Error> {
+        match &self.dev_info {
+            Some(dev_info) => Ok(dev_info.clone()),
+            None => Err(Error::NotInitalized),
+        }
     }
 
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
@@ -299,10 +273,24 @@ where
         Ok(DevInfo {
             panel_width: buf[0],
             panel_height: buf[1],
-            memory_address: ((buf[2] as u32) << 16) | (buf[3] as u32),
-            firmware_version: buf[4..12].try_into().unwrap(),
-            lut_version: buf[12..20].try_into().unwrap(),
+            memory_address: ((buf[3] as u32) << 16) | (buf[2] as u32),
+            firmware_version: self.buf_to_string(&buf[4..12]),
+            lut_version: self.buf_to_string(&buf[12..20]),
         })
+    }
+
+    fn buf_to_string(&self, buf: &[u16]) -> String {
+        buf.iter()
+            .filter(|&&raw| raw != 0x0000)
+            .fold(String::new(), |mut res, &raw| {
+                if let Some(c) = char::from_u32((raw & 0xFF) as u32) {
+                    res.push(c);
+                }
+                if let Some(c) = char::from_u32((raw >> 8) as u32) {
+                    res.push(c);
+                }
+                res
+            })
     }
 
     fn get_vcom(&mut self) -> Result<u16, Error> {
@@ -344,7 +332,7 @@ where
 {
     type Color = Gray4;
 
-    type Error = core::convert::Infallible;
+    type Error = Error;
 
     // fetch area from it8951 frame buffer,
     // overwrites given pixels
@@ -364,6 +352,7 @@ where
 
     // create area locally and send it to the devices
     // split into multiple buffers if to big for ram
+    // raspi spi buffer size is 4096kb
     // refresh full frame
     fn fill_solid(
         &mut self,
@@ -373,8 +362,44 @@ where
         todo!()
     }
 
-    fn clear(&mut self, _color: Self::Color) -> Result<(), Self::Error> {
-        todo!()
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        let dev_info = self.get_dev_info()?;
+        let width = dev_info.panel_width;
+        let height = dev_info.panel_height;
+        let mem_addr = dev_info.memory_address;
+        let pixel_data_u8: u8 = color.luma() | color.luma() << 4;
+        let pixel_data_u16 = (pixel_data_u8 as u16) << 8 | pixel_data_u8 as u16;
+
+        // we need to split the data in multiple transfers to keep the buffer size small
+        for w in 0..height {
+            self.load_image_area(
+                mem_addr,
+                MemoryConverterSetting {
+                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
+                    bit_per_pixel:
+                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
+                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
+                },
+                &AreaImgInfo {
+                    area_x: 0,
+                    area_y: w,
+                    area_w: width,
+                    area_h: 1,
+                },
+                &vec![pixel_data_u16; width as usize / 4],
+            )?;
+        }
+
+        self.display_area(
+            &AreaImgInfo {
+                area_x: 0,
+                area_y: 0,
+                area_w: width,
+                area_h: height,
+            },
+            WaveformMode::Init,
+        )?;
+        Ok(())
     }
 
     // it is possible to set only on pixel by using load image area with a area size of 1
@@ -383,7 +408,7 @@ where
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
     {
-        let dev_info = self.dev_info.as_ref().unwrap();
+        let dev_info = self.get_dev_info()?;
         let width = dev_info.panel_width as i32;
         let height = dev_info.panel_height as i32;
         for Pixel(coord, _color) in pixels.into_iter() {

@@ -155,8 +155,8 @@ where
         const OFFSET: usize = 4;
         for index in 0..buf.len() {
             buf[index] = u16::from_be_bytes([
-                read_buf[OFFSET + index / 2],
-                read_buf[OFFSET + index / 2 + 1],
+                read_buf[OFFSET + index * 2],
+                read_buf[OFFSET + index * 2 + 1],
             ]);
         }
 
