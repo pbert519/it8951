@@ -3,6 +3,14 @@ use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
 use linux_embedded_hal::{CdevPin, Delay, Spidev};
 use std::error::Error;
 
+use embedded_graphics::{
+    pixelcolor::Gray4,
+    prelude::*,
+    primitives::{
+        PrimitiveStyle, Rectangle, 
+    },
+};
+
 fn main() -> Result<(), Box<dyn Error>> {
     // Raspi SPI0.0
     // MISO: 9
@@ -34,6 +42,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     epd.init(1670).unwrap();
 
     println!("Initalized E-Ink Display: \n\r {:?}", epd.get_dev_info());
+
+    // ToDo: Fails with not yet implemented
+    // clear screen
+    // epd.clear(Gray4::WHITE)?;
+
+    // Draw a filled square
+    // Rectangle::new(Point::new(50, 350), Size::new(200, 200))
+    //    .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
+    //    .draw(&mut epd)?;
 
     epd.sleep().unwrap();
 
