@@ -14,9 +14,17 @@ pub trait IT8951Interface {
 
     fn write_data(&mut self, data: u16) -> Result<(), Error>;
 
-    fn write_multi_data(&mut self, data: &mut [u16]) -> Result<(), Error>;
+    fn write_multi_data(&mut self, data: &[u16]) -> Result<(), Error>;
 
     fn write_command(&mut self, cmd: u16) -> Result<(), Error>;
+
+    fn write_command_with_args(&mut self, cmd: u16, args: &[u16]) -> Result<(), Error> {
+        self.write_command(cmd)?;
+        for arg in args {
+            self.write_data(*arg)?;
+        }
+        Ok(())
+    }
 
     fn read_data(&mut self) -> Result<u16, Error>;
 
@@ -81,7 +89,7 @@ where
         Ok(())
     }
 
-    fn write_multi_data(&mut self, data: &mut [u16]) -> Result<(), Error> {
+    fn write_multi_data(&mut self, data: &[u16]) -> Result<(), Error> {
         self.wait_while_busy()?;
 
         // Write Data:

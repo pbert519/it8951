@@ -3,71 +3,20 @@
 #[macro_use]
 extern crate alloc;
 
-pub mod comm;
+mod command;
+pub mod interface;
+pub mod memory_converter_settings;
+mod register;
 
+use crate::memory_converter_settings::MemoryConverterSetting;
 use core::fmt::Debug;
-
-// ---- IT8951 Registers defines -----------------------------------------------------------------
-
-//Register Base Address
-const DISPLAY_REG_BASE: u16 = 0x1000; //Register RW access
-
-//Base Address of Basic LUT Registers
-#[allow(clippy::identity_op)]
-const _LUT0EWHR: u16 = DISPLAY_REG_BASE + 0x00; //LUT0 Engine Width Height Reg
-const _LUT0XYR: u16 = DISPLAY_REG_BASE + 0x40; //LUT0 XY Reg
-const _LUT0BADDR: u16 = DISPLAY_REG_BASE + 0x80; //LUT0 Base Address Reg
-const _LUT0MFN: u16 = DISPLAY_REG_BASE + 0xC0; //LUT0 Mode and Frame number Reg
-const _LUT01AF: u16 = DISPLAY_REG_BASE + 0x114; //LUT0 and LUT1 Active Flag Reg
-
-//Update Parameter Setting Register
-const _UP0SR: u16 = DISPLAY_REG_BASE + 0x134; //Update Parameter0 Setting Reg
-const _UP1SR: u16 = DISPLAY_REG_BASE + 0x138; //Update Parameter1 Setting Reg
-const _LUT0ABFRV: u16 = DISPLAY_REG_BASE + 0x13C; //LUT0 Alpha blend and Fill rectangle Value
-const _UPBBADDR: u16 = DISPLAY_REG_BASE + 0x17C; //Update Buffer Base Address
-const _LUT0IMXY: u16 = DISPLAY_REG_BASE + 0x180; //LUT0 Image buffer X/Y offset Reg
-const LUTAFSR: u16 = DISPLAY_REG_BASE + 0x224; //LUT Status Reg (status of All LUT Engines)
-const _BGVR: u16 = DISPLAY_REG_BASE + 0x250; //Bitmap (1bpp) image color table
-
-//System Registers
-const SYS_REG_BASE: u16 = 0x0000;
-
-//Address of System Registers
-const I80CPCR: u16 = SYS_REG_BASE + 0x04;
-
-//Memory Converter Registers
-const MCSR_BASE_ADDR: u16 = 0x0200;
-#[allow(clippy::identity_op)]
-const _MCSR: u16 = MCSR_BASE_ADDR + 0x0000;
-const LISAR: u16 = MCSR_BASE_ADDR + 0x0008;
-
-// ---- IT8951 Command defines -----------------------------------------------------------------
-// Commands
-const IT8951_TCON_SYS_RUN: u16 = 0x0001;
-const IT8951_TCON_STANDBY: u16 = 0x0002;
-const IT8951_TCON_SLEEP: u16 = 0x0003;
-const _IT8951_TCON_REG_RD: u16 = 0x0010;
-const IT8951_TCON_REG_WR: u16 = 0x0011;
-const _IT8951_TCON_MEM_BST_RD_T: u16 = 0x0012;
-const _IT8951_TCON_MEM_BST_RD_S: u16 = 0x0013;
-const _IT8951_TCON_MEM_BST_WR: u16 = 0x0014;
-const _IT8951_TCON_MEM_BST_END: u16 = 0x0015;
-const IT8951_TCON_LD_IMG: u16 = 0x0020;
-const IT8951_TCON_LD_IMG_AREA: u16 = 0x0021;
-const IT8951_TCON_LD_IMG_END: u16 = 0x0022;
-
-//I80 User defined command code
-const USDEF_I80_CMD_DPY_AREA: u16 = 0x0034;
-const USDEF_I80_CMD_GET_DEV_INFO: u16 = 0x0302;
-const USDEF_I80_CMD_DPY_BUF_AREA: u16 = 0x0037;
-const USDEF_I80_CMD_VCOM: u16 = 0x0039;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    Interface(comm::Error),
+    Interface(interface::Error),
 }
-impl From<comm::Error> for Error {
-    fn from(e: comm::Error) -> Self {
+impl From<interface::Error> for Error {
+    fn from(e: interface::Error) -> Self {
         Error::Interface(e)
     }
 }
@@ -81,19 +30,23 @@ pub struct DevInfo {
     pub lut_version: [u16; 8],
 }
 
-struct LoadImgInfo {
-    endian_type: u16,
-    pixel_format: u16,
-    rotate: u16,
-    source_buffer_addr: u32,
-    target_memory_addr: u32,
-}
-
-struct AreaImgInfo {
+pub struct AreaImgInfo {
     area_x: u16,
     area_y: u16,
     area_w: u16,
     area_h: u16,
+}
+
+/// See https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf for full description
+pub enum WaveformMode {
+    Init = 0, // used for full erase to white, flashy, should be used if framebuffer is not up to date
+    DirectUpdate = 1, // any graytone to black or white, non flashy
+    GrayscaleClearing16 = 2, // high image quality, all graytones
+    GL16 = 3, // sparse content on white, eg. text
+    GLR16 = 4, // only in combination with with propertary image preprocessing
+    GLD16 = 5, // only in combination with with propertary image preprocessing
+    A2 = 6,   // fast, non-flash, from black/white to black/white only
+    DU4 = 7,  // fast, non flash, from any graytone to 1,6,11,16
 }
 
 pub struct IT8951<IT8951Interface> {
@@ -103,7 +56,7 @@ pub struct IT8951<IT8951Interface> {
 
 impl<IT8951Interface> IT8951<IT8951Interface>
 where
-    IT8951Interface: comm::IT8951Interface,
+    IT8951Interface: interface::IT8951Interface,
 {
     pub fn new(interface: IT8951Interface) -> IT8951<IT8951Interface> {
         IT8951 {
@@ -114,12 +67,12 @@ where
 
     pub fn init(&mut self, vcom: u16) -> Result<(), Error> {
         self.interface.reset()?;
-        self.interface.write_command(IT8951_TCON_SYS_RUN)?;
+        self.sys_run()?;
 
         let dev_info = self.get_system_info()?;
 
         // Enable Pack Write
-        self.write_register(I80CPCR, 0x0001)?;
+        self.write_register(register::I80CPCR, 0x0001)?;
 
         if vcom != self.get_vcom()? {
             self.set_vcom(vcom)?;
@@ -134,19 +87,35 @@ where
         &self.dev_info
     }
 
+    // ToDo: this function is only for testing purposes
     pub fn clear_refresh(&mut self) {
-        //let dev_info = self.dev_info.as_ref().unwrap();
-        todo!();
-    }
+        let dev_info = self.dev_info.as_ref().unwrap();
+        let pixels: usize = dev_info.panel_height as usize * dev_info.panel_width as usize;
+        let width = dev_info.panel_width;
+        let height = dev_info.panel_height;
+        let mem_addr = dev_info.memory_address;
 
-    pub fn sleep(&mut self) -> Result<(), Error> {
-        self.interface.write_command(IT8951_TCON_SLEEP)?;
-        Ok(())
-    }
+        self.load_image(
+            mem_addr,
+            MemoryConverterSetting {
+                endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
+                bit_per_pixel: memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
+                rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
+            },
+            &vec![0x00; pixels / 2],
+        )
+        .expect("Load image error");
 
-    pub fn standby(&mut self) -> Result<(), Error> {
-        self.interface.write_command(IT8951_TCON_STANDBY)?;
-        Ok(())
+        self.display_area(
+            &AreaImgInfo {
+                area_x: 0,
+                area_y: 0,
+                area_w: width,
+                area_h: height,
+            },
+            WaveformMode::Init,
+        )
+        .expect("Display image error");
     }
 
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
@@ -156,124 +125,170 @@ where
 
     // load image functions ------------------------------------------------------------------------------------------
 
+    pub fn load_image(
+        &mut self,
+        target_mem_addr: u32,
+        image_settings: MemoryConverterSetting,
+        data: &[u16],
+    ) -> Result<(), Error> {
+        self.set_target_memory_addr(target_mem_addr)?;
+
+        self.interface.write_command(command::IT8951_TCON_LD_IMG)?;
+        self.interface.write_data(image_settings.into_arg())?;
+
+        self.interface.write_multi_data(data)?;
+
+        self.interface
+            .write_command(command::IT8951_TCON_LD_IMG_END)?;
+        Ok(())
+    }
+
+    pub fn load_image_area(
+        &mut self,
+        target_mem_addr: u32,
+        image_settings: MemoryConverterSetting,
+        area_info: &AreaImgInfo,
+        data: &[u16],
+    ) -> Result<(), Error> {
+        self.set_target_memory_addr(target_mem_addr)?;
+
+        self.interface.write_command_with_args(
+            command::IT8951_TCON_LD_IMG_AREA,
+            &[
+                image_settings.into_arg(),
+                area_info.area_x,
+                area_info.area_y,
+                area_info.area_w,
+                area_info.area_h,
+            ],
+        )?;
+
+        self.interface.write_multi_data(data)?;
+
+        self.interface
+            .write_command(command::IT8951_TCON_LD_IMG_END)?;
+
+        Ok(())
+    }
+
     fn set_target_memory_addr(&mut self, target_mem_addr: u32) -> Result<(), Error> {
-        self.write_register(LISAR + 2, (target_mem_addr >> 16) as u16)?;
-        self.write_register(LISAR, target_mem_addr as u16)?;
+        self.write_register(register::LISAR + 2, (target_mem_addr >> 16) as u16)?;
+        self.write_register(register::LISAR, target_mem_addr as u16)?;
         Ok(())
     }
 
-    fn load_image_start(&mut self, image_info: &LoadImgInfo) -> Result<(), Error> {
-        let arg0: u16 =
-            (image_info.endian_type << 8) | (image_info.pixel_format << 4) | image_info.rotate;
+    // buffer functions -------------------------------------------------------------------------------------------------
 
-        self.interface.write_command(IT8951_TCON_LD_IMG)?;
-        self.interface.write_data(arg0)?;
-
-        Ok(())
-    }
-
-    fn load_img_area_start(
+    pub fn memory_burst_read(
         &mut self,
-        image_info: &LoadImgInfo,
-        area_info: &AreaImgInfo,
+        memory_address: u32,
+        data: &mut [u16],
     ) -> Result<(), Error> {
-        let arg0: u16 =
-            (image_info.endian_type << 8) | (image_info.pixel_format << 4) | image_info.rotate;
-
         let args = [
-            arg0,
-            area_info.area_x,
-            area_info.area_y,
-            area_info.area_w,
-            area_info.area_h,
+            memory_address as u16,
+            (memory_address >> 16) as u16,
+            data.len() as u16,
+            (data.len() >> 16) as u16,
         ];
+        self.interface
+            .write_command_with_args(command::IT8951_TCON_MEM_BST_RD_T, &args)?;
+        self.interface
+            .write_command(command::IT8951_TCON_MEM_BST_RD_S)?;
 
-        self.write_multi_args(IT8951_TCON_LD_IMG_AREA, &args)?;
-        Ok(())
-    }
+        self.interface.read_multi_data(data)?;
 
-    fn load_img_end(&mut self) -> Result<(), Error> {
-        self.interface.write_command(IT8951_TCON_LD_IMG_END)?;
-        Ok(())
-    }
-
-    fn host_area_packed_pixel_write_4bp(
-        &mut self,
-        image_info: &LoadImgInfo,
-        area_info: &AreaImgInfo,
-    ) -> Result<(), Error> {
-        self.set_target_memory_addr(image_info.target_memory_addr)?;
-        self.load_img_area_start(image_info, area_info)?;
-
-        // write data
-
-        self.load_img_end()?;
+        self.interface
+            .write_command(command::IT8951_TCON_MEM_BST_END)?;
 
         Ok(())
     }
 
-    pub fn refresh_4bp(&mut self) -> Result<(), Error> {
-        self.wait_for_display_ready()?;
+    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u16]) -> Result<(), Error> {
+        let args = [
+            memory_address as u16,
+            (memory_address >> 16) as u16,
+            data.len() as u16,
+            (data.len() >> 16) as u16,
+        ];
+        self.interface
+            .write_command_with_args(command::IT8951_TCON_MEM_BST_WR, &args)?;
 
-        let image_info = LoadImgInfo {
-            endian_type: 0,
-            pixel_format: 0,
-            rotate: 0,
-            source_buffer_addr: 0,
-            target_memory_addr: 0,
-        };
-        let area_info = AreaImgInfo {
-            area_x: 0,
-            area_y: 0,
-            area_w: 10,
-            area_h: 10,
-        };
+        self.interface.write_multi_data(data)?;
 
-        self.host_area_packed_pixel_write_4bp(&image_info, &area_info)?;
-
+        self.interface
+            .write_command(command::IT8951_TCON_MEM_BST_END)?;
         Ok(())
     }
 
     // display functions ------------------------------------------------------------------------------------------------
-    pub fn display_area(&mut self, x: u16, y: u16, w: u16, h: u16, mode: u16) -> Result<(), Error> {
-        let args = [x, y, w, h, mode];
+    pub fn display_area(
+        &mut self,
+        area_info: &AreaImgInfo,
+        mode: WaveformMode,
+    ) -> Result<(), Error> {
+        self.wait_for_display_ready()?;
 
-        self.write_multi_args(USDEF_I80_CMD_DPY_AREA, &args)?;
+        let args = [
+            area_info.area_x,
+            area_info.area_y,
+            area_info.area_w,
+            area_info.area_h,
+            mode as u16,
+        ];
+
+        self.interface
+            .write_command_with_args(command::USDEF_I80_CMD_DPY_AREA, &args)?;
         Ok(())
     }
 
     pub fn display_area_buf(
         &mut self,
-        x: u16,
-        y: u16,
-        w: u16,
-        h: u16,
-        mode: u16,
+        area_info: &AreaImgInfo,
+        mode: WaveformMode,
         target_mem_addr: u32,
     ) -> Result<(), Error> {
+        self.wait_for_display_ready()?;
+
         let args = [
-            x,
-            y,
-            w,
-            h,
-            mode,
+            area_info.area_x,
+            area_info.area_y,
+            area_info.area_w,
+            area_info.area_h,
+            mode as u16,
             target_mem_addr as u16,
             (target_mem_addr >> 16) as u16,
         ];
 
-        self.write_multi_args(USDEF_I80_CMD_DPY_BUF_AREA, &args)?;
+        self.interface
+            .write_command_with_args(command::USDEF_I80_CMD_DPY_BUF_AREA, &args)?;
         Ok(())
     }
 
-    // private functions ------------------------------------------------------------------------------------------------
+    // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
-        while Ok(0) != self.read_register(LUTAFSR) {}
+        while Ok(0) != self.read_register(register::LUTAFSR) {}
+        Ok(())
+    }
+
+    fn sys_run(&mut self) -> Result<(), Error> {
+        self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
+        Ok(())
+    }
+
+    pub fn sleep(&mut self) -> Result<(), Error> {
+        self.interface.write_command(command::IT8951_TCON_SLEEP)?;
+        Ok(())
+    }
+
+    pub fn standby(&mut self) -> Result<(), Error> {
+        self.interface.write_command(command::IT8951_TCON_STANDBY)?;
         Ok(())
     }
 
     fn get_system_info(&mut self) -> Result<DevInfo, Error> {
-        self.interface.write_command(USDEF_I80_CMD_GET_DEV_INFO)?;
+        self.interface
+            .write_command(command::USDEF_I80_CMD_GET_DEV_INFO)?;
 
         self.interface.wait_while_busy()?;
 
@@ -291,38 +306,30 @@ where
     }
 
     fn get_vcom(&mut self) -> Result<u16, Error> {
-        self.interface.write_command(USDEF_I80_CMD_VCOM)?;
+        self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0000)?;
         let vcom = self.interface.read_data()?;
         Ok(vcom)
     }
 
     fn set_vcom(&mut self, vcom: u16) -> Result<(), Error> {
-        self.interface.write_command(USDEF_I80_CMD_VCOM)?;
+        self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0001)?;
         self.interface.write_data(vcom)?;
         Ok(())
     }
 
     fn read_register(&mut self, reg: u16) -> Result<u16, Error> {
-        self.interface.write_command(_IT8951_TCON_REG_RD)?;
+        self.interface.write_command(command::IT8951_TCON_REG_RD)?;
         self.interface.write_data(reg)?;
         let data = self.interface.read_data()?;
         Ok(data)
     }
 
     fn write_register(&mut self, reg: u16, data: u16) -> Result<(), Error> {
-        self.interface.write_command(IT8951_TCON_REG_WR)?;
+        self.interface.write_command(command::IT8951_TCON_REG_WR)?;
         self.interface.write_data(reg)?;
         self.interface.write_data(data)?;
-        Ok(())
-    }
-
-    fn write_multi_args(&mut self, cmd: u16, args: &[u16]) -> Result<(), Error> {
-        self.interface.write_command(cmd)?;
-        for arg in args {
-            self.interface.write_data(*arg)?;
-        }
         Ok(())
     }
 }
@@ -333,7 +340,7 @@ use embedded_graphics::{pixelcolor::Gray4, prelude::*};
 
 impl<IT8951Interface> DrawTarget for IT8951<IT8951Interface>
 where
-    IT8951Interface: comm::IT8951Interface,
+    IT8951Interface: interface::IT8951Interface,
 {
     type Color = Gray4;
 
@@ -346,8 +353,8 @@ where
     // full refresh
     fn fill_contiguous<I>(
         &mut self,
-        area: &embedded_graphics::primitives::Rectangle,
-        colors: I,
+        _area: &embedded_graphics::primitives::Rectangle,
+        _colors: I,
     ) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,
@@ -360,21 +367,18 @@ where
     // refresh full frame
     fn fill_solid(
         &mut self,
-        area: &embedded_graphics::primitives::Rectangle,
-        color: Self::Color,
+        _area: &embedded_graphics::primitives::Rectangle,
+        _color: Self::Color,
     ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+    fn clear(&mut self, _color: Self::Color) -> Result<(), Self::Error> {
         todo!()
     }
 
-    // Fetch frame buffer for every pixel,
-    // modify it
-    // and upload it again
-    // after all pixels are processed, refresh full frame
-    // do we even have a accessible frame buffer?!
+    // it is possible to set only on pixel by using load image area with a area size of 1
+    // however we still have to send 2 bytes, the other 3 pixels are ignored
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
@@ -393,7 +397,7 @@ where
 
 impl<IT8951Interface> OriginDimensions for IT8951<IT8951Interface>
 where
-    IT8951Interface: comm::IT8951Interface,
+    IT8951Interface: interface::IT8951Interface,
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
