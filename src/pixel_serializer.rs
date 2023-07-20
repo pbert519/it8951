@@ -10,7 +10,8 @@ use embedded_graphics::{
 pub struct PixelSerializer<I: Iterator<Item = Pixel<Gray4>>> {
     area: Rectangle,
     pixels: I,
-    row: i32,
+    row: usize,
+    max_entries: usize,
 }
 
 impl<I: Iterator<Item = Pixel<Gray4>>> PixelSerializer<I> {
@@ -19,6 +20,15 @@ impl<I: Iterator<Item = Pixel<Gray4>>> PixelSerializer<I> {
             area,
             pixels,
             row: 0,
+            /// 512 * 2 Bytes = 1kByte
+            max_entries: 512,
+        }
+    }
+    // max buffer size in 16bit words
+    pub fn with_buffer_max_words(self, size: usize) -> Self {
+        Self {
+            max_entries: size,
+            ..self
         }
     }
 }
@@ -27,43 +37,47 @@ impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
     type Item = (AreaImgInfo, Vec<u16>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.row += 1;
+        if self.row >= self.area.size.height as usize {
+            return None;
+        }
 
-        let mut pixel_counter = 0;
+        let start_row = self.row;
 
         // prepare buffer with enough capacity
-        let entries_per_row = (self.area.size.width + (self.area.top_left.x % 4) as u32 + 3) / 4;
-        let mut bytes = Vec::with_capacity(entries_per_row as usize);
+        let entries_per_row =
+            ((self.area.size.width + (self.area.top_left.x % 4) as u32 + 3) / 4) as usize;
+        let max_rows = (self.max_entries / entries_per_row).min(self.area.size.height as usize);
+        assert!(max_rows > 0, "Buffer size to smal for one row");
+        //let mut bytes = Vec::with_capacity(entries_per_row * max_rows);
+        let mut bytes = vec![0x0000; entries_per_row * max_rows];
 
         // add all pixels to buffer
         for Pixel(point, color) in self.pixels.by_ref() {
-            let byte_pos = ((point.x - (self.area.top_left.x / 4 * 4)) / 4) as usize;
-            let shift = (point.x % 4) * 4;
+            let byte_pos = ((point.x - (self.area.top_left.x / 4 * 4)) / 4) as usize
+                + entries_per_row * (self.row - start_row);
+            let bit_pos = (point.x % 4) * 4;
 
-            if bytes.len() <= byte_pos {
-                bytes.push(0x0000);
-            }
-            bytes[byte_pos] |= (color.luma() as u16) << shift;
+            bytes[byte_pos] |= (color.luma() as u16) << bit_pos;
 
-            pixel_counter += 1;
-            // abort condition end of row
+            //  end of row
             if point.x >= self.area.top_left.x + self.area.size.width as i32 - 1 {
+                self.row += 1;
+            }
+            // abort if all rows are written to buffer
+            if self.row >= max_rows + start_row {
                 break;
             }
         }
-        if bytes.is_empty() {
-            None
-        } else {
-            Some((
-                AreaImgInfo {
-                    area_x: self.area.top_left.x as u16,
-                    area_y: (self.area.top_left.y + self.row - 1) as u16,
-                    area_w: pixel_counter,
-                    area_h: 1,
-                },
-                bytes,
-            ))
-        }
+
+        Some((
+            AreaImgInfo {
+                area_x: self.area.top_left.x as u16,
+                area_y: (self.area.top_left.y + start_row as i32) as u16,
+                area_w: self.area.size.width as u16,
+                area_h: (self.row - start_row) as u16,
+            },
+            bytes,
+        ))
     }
 }
 
@@ -321,7 +335,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        );
+        )
+        .with_buffer_max_words(1);
         assert_eq!(
             s.next(),
             Some((
@@ -374,7 +389,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        );
+        )
+        .with_buffer_max_words(2);
         assert_eq!(
             s.next(),
             Some((
@@ -403,8 +419,51 @@ mod tests {
     }
 
     #[test]
-    // two rows of pixels, not aligned, color iterator has less pixel than area
-    fn test_pixel_rows_early_exit() {
+    // two rows of pixels, aligned
+    fn test_pixel_rows_packed_multirow() {
+        let area = Rectangle {
+            top_left: Point { x: 4, y: 1 },
+            size: Size {
+                width: 4,
+                height: 2,
+            },
+        };
+        let mut s = PixelSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            convert_color_to_pixel_iterator(
+                area,
+                BOUNDING_BOX_DEFAULT,
+                vec![
+                    Gray4::new(0xA),
+                    Gray4::new(0xB),
+                    Gray4::new(0xC),
+                    Gray4::new(0xD),
+                    Gray4::new(0x1),
+                    Gray4::new(0x2),
+                    Gray4::new(0x3),
+                    Gray4::new(0x4),
+                ]
+                .into_iter(),
+            ),
+        );
+        assert_eq!(
+            s.next(),
+            Some((
+                AreaImgInfo {
+                    area_x: 4,
+                    area_y: 1,
+                    area_w: 4,
+                    area_h: 2
+                },
+                vec![0xDCBA, 0x4321]
+            ))
+        );
+        assert_eq!(s.next(), None);
+    }
+
+    #[test]
+    // two rows of pixels, not aligned
+    fn test_pixel_rows_multirow() {
         let area = Rectangle {
             top_left: Point { x: 3, y: 1 },
             size: Size {
@@ -423,6 +482,7 @@ mod tests {
                     Gray4::new(0xE),
                     Gray4::new(0x1),
                     Gray4::new(0x2),
+                    Gray4::new(0x3),
                 ]
                 .into_iter(),
             ),
@@ -434,105 +494,9 @@ mod tests {
                     area_x: 3,
                     area_y: 1,
                     area_w: 3,
-                    area_h: 1
+                    area_h: 2
                 },
-                vec![0xC000, 0x00ED]
-            ))
-        );
-        assert_eq!(
-            s.next(),
-            Some((
-                AreaImgInfo {
-                    area_x: 3,
-                    area_y: 2,
-                    area_w: 2,
-                    area_h: 1
-                },
-                vec![0x1000, 0x0002]
-            ))
-        );
-        assert_eq!(s.next(), None);
-    }
-
-    #[test]
-    // two rows of pixels, not aligned, color iterator has less pixel than area -> a full u16 is missing
-    fn test_pixel_rows_early_exit_full_byte() {
-        let area = Rectangle {
-            top_left: Point { x: 3, y: 1 },
-            size: Size {
-                width: 3,
-                height: 2,
-            },
-        };
-        let mut s = PixelSerializer::new(
-            area.intersection(&BOUNDING_BOX_DEFAULT),
-            convert_color_to_pixel_iterator(
-                area,
-                BOUNDING_BOX_DEFAULT,
-                vec![
-                    Gray4::new(0xC),
-                    Gray4::new(0xD),
-                    Gray4::new(0xE),
-                    Gray4::new(0x1),
-                ]
-                .into_iter(),
-            ),
-        );
-        assert_eq!(
-            s.next(),
-            Some((
-                AreaImgInfo {
-                    area_x: 3,
-                    area_y: 1,
-                    area_w: 3,
-                    area_h: 1
-                },
-                vec![0xC000, 0x00ED]
-            ))
-        );
-        assert_eq!(
-            s.next(),
-            Some((
-                AreaImgInfo {
-                    area_x: 3,
-                    area_y: 2,
-                    area_w: 1,
-                    area_h: 1
-                },
-                vec![0x1000]
-            ))
-        );
-        assert_eq!(s.next(), None);
-    }
-
-    #[test]
-    // two rows of pixels, not aligned, color iterator has less pixel than area -> a full row is missing
-    fn test_pixel_rows_early_exit_full_row() {
-        let area = Rectangle {
-            top_left: Point { x: 3, y: 1 },
-            size: Size {
-                width: 3,
-                height: 2,
-            },
-        };
-        let mut s = PixelSerializer::new(
-            area.intersection(&BOUNDING_BOX_DEFAULT),
-            convert_color_to_pixel_iterator(
-                area,
-                BOUNDING_BOX_DEFAULT,
-                vec![Gray4::new(0xC), Gray4::new(0xD), Gray4::new(0xE)].into_iter(),
-            ),
-        );
-        assert_eq!(
-            s.next(),
-            Some((
-                AreaImgInfo {
-                    area_x: 3,
-                    area_y: 1,
-                    area_w: 3,
-                    area_h: 1
-                },
-                vec![0xC000, 0x00ED]
+                vec![0xC000, 0x00ED, 0x1000, 0x0032]
             ))
         );
         assert_eq!(s.next(), None);
