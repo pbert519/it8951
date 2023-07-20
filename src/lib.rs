@@ -12,10 +12,11 @@ use alloc::string::String;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
+mod pixel_serializer;
 mod register;
 
-use crate::memory_converter_settings::MemoryConverterSetting;
-use core::fmt::Debug;
+use memory_converter_settings::MemoryConverterSetting;
+use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
 /// Controller Error
 #[derive(Debug, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub struct DevInfo {
 }
 
 /// Describes a area on the display
+#[derive(Debug, PartialEq, Eq)]
 pub struct AreaImgInfo {
     /// x position (left to right, 0 is top left corner)
     pub area_x: u16,
@@ -140,7 +142,6 @@ where
 
     /// initalize the frame buffer and clear the display to white
     pub fn reset(&mut self) -> Result<(), Error> {
-
         self.clear_frame_buffer(0xF)?;
         self.display(WaveformMode::Init)?;
         Ok(())
@@ -444,7 +445,7 @@ where
 
 // --------------------------- embedded graphics support --------------------------------------
 
-use embedded_graphics::{pixelcolor::Gray4, prelude::*};
+use embedded_graphics::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
 impl<IT8951Interface> DrawTarget for IT8951<IT8951Interface>
 where
@@ -457,6 +458,31 @@ where
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         let raw_color = color.luma() as u16;
         self.clear_frame_buffer(raw_color)
+    }
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        let iter = convert_color_to_pixel_iterator(*area, self.bounding_box(), colors.into_iter());
+
+        let pixel = PixelSerializer::new(area.intersection(&self.bounding_box()), iter);
+
+        for (area_img_info, buffer) in pixel {
+            let dev_info = self.get_dev_info()?;
+            self.load_image_area(
+                dev_info.memory_address,
+                MemoryConverterSetting {
+                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
+                    bit_per_pixel:
+                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
+                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
+                },
+                &area_img_info,
+                &buffer,
+            )?;
+        }
+        Ok(())
     }
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
