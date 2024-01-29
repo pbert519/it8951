@@ -1,6 +1,6 @@
 use crate::AreaImgInfo;
 use alloc::vec::Vec;
-use embedded_graphics::{
+use embedded_graphics_core::{
     pixelcolor::Gray4,
     prelude::*,
     primitives::{PointsIter, Rectangle},

@@ -1,8 +1,8 @@
 //! Contains the controller interface
 
 use embedded_hal::{
-    blocking::{delay::*, spi::Transfer, spi::Write},
-    digital::v2::{InputPin, OutputPin},
+    digital::{InputPin, OutputPin},
+    {delay::*, spi::SpiDevice},
 };
 
 /// Interface Error
@@ -59,10 +59,10 @@ pub struct IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
 
 impl<SPI, BUSY, RST, DELAY> IT8951SPIInterface<SPI, BUSY, RST, DELAY>
 where
-    SPI: Write<u8> + Transfer<u8>,
+    SPI: SpiDevice,
     BUSY: InputPin,
     RST: OutputPin,
-    DELAY: DelayMs<u8>,
+    DELAY: DelayNs,
 {
     /// Create a new spi controller interface
     pub fn new(
@@ -82,10 +82,10 @@ where
 
 impl<SPI, BUSY, RST, DELAY> IT8951Interface for IT8951SPIInterface<SPI, BUSY, RST, DELAY>
 where
-    SPI: Write<u8> + Transfer<u8>,
+    SPI: SpiDevice,
     BUSY: InputPin,
     RST: OutputPin,
-    DELAY: DelayMs<u8>,
+    DELAY: DelayNs,
 {
     fn wait_while_busy(&mut self) -> Result<(), Error> {
         while self.busy.is_low().unwrap_or(true) {}
@@ -146,7 +146,7 @@ where
         // Read Data
         // 0x1000 -> Prefix for Read Data
         let mut buf = [0x10, 0x00, 0x00, 0x00, 0x00, 0x00];
-        if self.spi.transfer(&mut buf).is_err() {
+        if self.spi.transfer_in_place(&mut buf).is_err() {
             return Err(Error::SpiError);
         }
         // we skip the first 2 bytes -> shifted out while transfer the prefix
@@ -164,7 +164,7 @@ where
         read_buf[0] = 0x10;
         read_buf[1] = 0x00;
 
-        if self.spi.transfer(&mut read_buf).is_err() {
+        if self.spi.transfer_in_place(&mut read_buf).is_err() {
             return Err(Error::SpiError);
         }
 

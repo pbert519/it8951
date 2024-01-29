@@ -1,6 +1,6 @@
 use linux_embedded_hal::gpio_cdev::{Chip, LineRequestFlags};
 use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
-use linux_embedded_hal::{CdevPin, Delay, Spidev};
+use linux_embedded_hal::{CdevPin, Delay, SpidevDevice};
 use std::error::Error;
 
 use embedded_graphics::{
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // MOSI: 10
     // SCK: 11
     // CS: 8
-    let mut spi = Spidev::open("/dev/spidev0.0")?;
+    let mut spi = SpidevDevice::open("/dev/spidev0.0")?;
     let spi_options = SpidevOptions::new()
         .bits_per_word(8)
         .max_speed_hz(12_000_000)

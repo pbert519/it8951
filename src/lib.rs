@@ -488,7 +488,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
 
 // --------------------------- embedded graphics support --------------------------------------
 
-use embedded_graphics::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
+use embedded_graphics_core::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
 impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951Interface, Run> {
     type Color = Gray4;
@@ -527,7 +527,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
+        I: IntoIterator<Item = embedded_graphics_core::Pixel<Self::Color>>,
     {
         let dev_info = self.get_dev_info();
         let width = dev_info.panel_width as i32;
