@@ -147,13 +147,13 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             interface,
             dev_info: None,
             marker: PhantomData {},
-        }.sys_run()?;
-        
+        }
+        .sys_run()?;
+
         it8951.dev_info = Some(it8951.get_system_info()?);
 
         Ok(it8951)
     }
-
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
