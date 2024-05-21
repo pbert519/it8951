@@ -3,7 +3,7 @@ target = "riscv32imc-esp-espidf"
 
 [target.riscv32imc-esp-espidf]
 linker = "ldproxy"
-runner = "espflash flash --monitor -b 1000000"
+runner = "espflash flash --monitor --baud 1000000"
 rustflags = ["--cfg", "espidf_time64", "-C", "default-linker-libraries"]
 
 [profile.release]
