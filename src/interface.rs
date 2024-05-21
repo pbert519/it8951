@@ -12,6 +12,8 @@ pub enum Error {
     SpiError,
     /// A error in the gpio driver
     GPIOError,
+    /// The display busy check timed out
+    BusyTimeout,
 }
 
 /// Trait to describe the interface with the controller
@@ -88,7 +90,14 @@ where
     DELAY: DelayNs,
 {
     fn wait_while_busy(&mut self) -> Result<(), Error> {
-        while self.busy.is_low().unwrap_or(true) {}
+        let mut counter = 0u64;
+        while self.busy.is_low().map_err(|_| Error::GPIOError)? {
+            if counter > 10_000_000u64 {
+                return Err(Error::BusyTimeout);
+            }
+            counter += 1;
+            self.delay.delay_us(1);
+        }
         Ok(())
     }
 
