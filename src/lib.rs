@@ -11,12 +11,15 @@ use core::marker::PhantomData;
 
 use alloc::string::String;
 
+mod area_serializer;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
 mod pixel_serializer;
 mod register;
+mod serialization_helper;
 
+use area_serializer::{AreaSerializer, AreaSerializerIterator};
 use memory_converter_settings::MemoryConverterSetting;
 use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
@@ -25,6 +28,8 @@ use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 pub enum Error {
     /// controller interface error
     Interface(interface::Error),
+    /// Timeout
+    DisplayEngineTimeout,
 }
 impl From<interface::Error> for Error {
     fn from(e: interface::Error) -> Self {
@@ -385,7 +390,14 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
-        while Ok(0) != self.read_register(register::LUTAFSR) {}
+        let mut counter = 0u64;
+        while 0 != self.read_register(register::LUTAFSR)? {
+            if counter > 10_000_000u64 {
+                return Err(Error::DisplayEngineTimeout);
+            }
+            counter += 1;
+            self.interface.delay(core::time::Duration::from_micros(1))?;
+        }
         Ok(())
     }
 
@@ -500,6 +512,22 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         self.clear_frame_buffer(raw_color)
     }
 
+    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        let a = AreaSerializer::new(*area, color);
+        let area_iter = AreaSerializerIterator::new(&a);
+
+        for (area_img_info, buffer) in area_iter {
+            let dev_info = self.get_dev_info();
+            self.load_image_area(
+                dev_info.memory_address,
+                MemoryConverterSetting::default(),
+                &area_img_info,
+                buffer,
+            )?;
+        }
+        Ok(())
+    }
+
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,
@@ -512,12 +540,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
             let dev_info = self.get_dev_info();
             self.load_image_area(
                 dev_info.memory_address,
-                MemoryConverterSetting {
-                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                    bit_per_pixel:
-                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-                },
+                MemoryConverterSetting::default(),
                 &area_img_info,
                 &buffer,
             )?;
@@ -538,13 +561,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
 
                 self.load_image_area(
                     dev_info.memory_address,
-                    MemoryConverterSetting {
-                        endianness:
-                            memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                        bit_per_pixel:
-                            memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                        rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-                    },
+                    MemoryConverterSetting::default(),
                     &AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
