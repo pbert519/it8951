@@ -13,12 +13,12 @@ const _LUT01AF: u16 = DISPLAY_REG_BASE + 0x114; //LUT0 and LUT1 Active Flag Reg
 
 //Update Parameter Setting Register
 const _UP0SR: u16 = DISPLAY_REG_BASE + 0x134; //Update Parameter0 Setting Reg
-const _UP1SR: u16 = DISPLAY_REG_BASE + 0x138; //Update Parameter1 Setting Reg
+pub const UP1SR: u16 = DISPLAY_REG_BASE + 0x138; //Update Parameter1 Setting Reg
 const _LUT0ABFRV: u16 = DISPLAY_REG_BASE + 0x13C; //LUT0 Alpha blend and Fill rectangle Value
 const _UPBBADDR: u16 = DISPLAY_REG_BASE + 0x17C; //Update Buffer Base Address
 const _LUT0IMXY: u16 = DISPLAY_REG_BASE + 0x180; //LUT0 Image buffer X/Y offset Reg
 pub const LUTAFSR: u16 = DISPLAY_REG_BASE + 0x224; //LUT Status Reg (status of All LUT Engines)
-const _BGVR: u16 = DISPLAY_REG_BASE + 0x250; //Bitmap (1bpp) image color table
+pub const BGVR: u16 = DISPLAY_REG_BASE + 0x250; //Bitmap (1bpp) image color table
 
 //System Registers
 const SYS_REG_BASE: u16 = 0x0000;

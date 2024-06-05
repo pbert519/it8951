@@ -91,6 +91,18 @@ pub struct AreaImgInfo {
     pub area_h: u16,
 }
 
+impl AreaImgInfo {
+    /// Creates a area image info with the given size and the origin (0, 0)
+    pub fn with_size(width: u16, height: u16) -> Self {
+        Self {
+            area_x: 0,
+            area_y: 0,
+            area_w: width,
+            area_h: height,
+        }
+    }
+}
+
 /// See https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf for full description
 pub enum WaveformMode {
     /// used for full erase to white, flashy, should be used if framebuffer is not up to date
@@ -388,6 +400,35 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         Ok(())
     }
 
+    /// Display the defined area, but interpret the framebuffer as 1 bit per pixel.
+    /// the grayscale value for foreground and background are given by the parameters as fg_color and bg_color.
+    pub fn display_area_with_color(
+        &mut self,
+        area_info: &AreaImgInfo,
+        mode: WaveformMode,
+        color: u16,
+    ) -> Result<(), Error> {
+        self.wait_for_display_ready()?;
+
+        // enable 1bpp mode
+        let reg_value = self.read_register(register::UP1SR + 2)?;
+        self.write_register(register::UP1SR + 2, reg_value | (1u16 << 2))?;
+
+        // write color values
+        //let color_value = (fg_color as u16) << 8 | (bg_color as u16);
+        self.write_register(register::BGVR, color)?;
+
+        // update display
+        self.display_area(area_info, mode)?;
+        self.wait_for_display_ready()?;
+
+        // disable 1bpp mode
+        let reg_value = self.read_register(register::UP1SR + 2)?;
+        self.write_register(register::UP1SR + 2, reg_value & !(1u16 << 2))?;
+
+        Ok(())
+    }
+
     // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
@@ -513,18 +554,17 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     type Error = Error;
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let info = self.get_dev_info();
-
-        self.fill_solid(
-            &Rectangle::new(
-                Point::zero(),
-                Size {
-                    width: info.panel_width as u32,
-                    height: info.panel_height as u32,
-                },
+        let raw_color = color.luma() as u16;
+        self.display_area_with_color(
+            &AreaImgInfo::with_size(
+                self.get_dev_info().panel_width,
+                self.get_dev_info().panel_width,
             ),
-            color,
-        )
+            WaveformMode::GrayscaleClearing16,
+            raw_color,
+        )?;
+        //self.clear_frame_buffer(raw_color)
+        Ok(())
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {

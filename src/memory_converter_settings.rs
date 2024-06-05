@@ -11,6 +11,7 @@ pub enum MemoryConverterEndianness {
 
 /// Bits per pixel
 /// the pixel data send to the controller can encode the pixels with a different number of bits
+#[derive(Clone, Copy, Debug)]
 #[repr(u16)]
 pub enum MemoryConverterBitPerPixel {
     /// each pixel value is given by 2 bits
@@ -21,6 +22,18 @@ pub enum MemoryConverterBitPerPixel {
     BitsPerPixel4 = 0b10,
     /// each pixel value is given by 8 bits
     BitsPerPixel8 = 0b11,
+}
+
+impl MemoryConverterBitPerPixel {
+    /// Returns the number of pixels per byte
+    pub fn pixel_per_byte(&self) -> usize {
+        match self {
+            MemoryConverterBitPerPixel::BitsPerPixel2 => 4,
+            MemoryConverterBitPerPixel::BitsPerPixel3 => unimplemented!(),
+            MemoryConverterBitPerPixel::BitsPerPixel4 => 2,
+            MemoryConverterBitPerPixel::BitsPerPixel8 => 1,
+        }
+    }
 }
 
 /// The memory converter supports rotating the written pixel data
