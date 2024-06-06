@@ -1,8 +1,9 @@
 //! Contains the controller interface
 
 use embedded_hal::{
+    delay::*,
     digital::{InputPin, OutputPin},
-    {delay::*, spi::SpiDevice},
+    spi::{Operation, SpiDevice},
 };
 
 /// Interface Error
@@ -14,6 +15,8 @@ pub enum Error {
     GPIOError,
     /// The display busy check timed out
     BusyTimeout,
+    /// Buffer alignment incorrect
+    BufferAlignment,
 }
 
 /// Trait to describe the interface with the controller
@@ -25,8 +28,9 @@ pub trait IT8951Interface {
     /// write a 16bit value to the controller
     fn write_data(&mut self, data: u16) -> Result<(), Error>;
 
-    /// write mutliple 16bit values to the controller
-    fn write_multi_data(&mut self, data: &[u16]) -> Result<(), Error>;
+    /// write multiple 16bit values to the controller
+    /// data must be aligned to u16!
+    fn write_multi_data(&mut self, data: &[u8]) -> Result<(), Error>;
 
     /// issue a command on the controller
     fn write_command(&mut self, cmd: u16) -> Result<(), Error>;
@@ -119,19 +123,18 @@ where
         Ok(())
     }
 
-    fn write_multi_data(&mut self, data: &[u16]) -> Result<(), Error> {
+    fn write_multi_data(&mut self, data: &[u8]) -> Result<(), Error> {
         self.wait_while_busy()?;
 
-        // Write Data:
-        // 0x0000 -> Prefix for a Data Write
-        let mut buf = vec![0u8; data.len()*2 + 2 /*write data prefix */];
+        if data.len() % 2 > 0 {
+            return Err(Error::BufferAlignment);
+        };
 
-        for index in 0..data.len() {
-            buf[index * 2 + 2] = (data[index] >> 8) as u8;
-            buf[index * 2 + 2 + 1] = data[index] as u8;
-        }
-
-        if self.spi.write(&buf).is_err() {
+        if self
+            .spi
+            .transaction(&mut [Operation::Write(&[0x00, 0x00]), Operation::Write(data)])
+            .is_err()
+        {
             return Err(Error::SpiError);
         }
 

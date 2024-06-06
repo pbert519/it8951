@@ -139,6 +139,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         it8951.dev_info = Some(dev_info);
 
+        // TODO check if necessary
         it8951.reset()?;
 
         Ok(it8951)
@@ -176,40 +177,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
     /// initalize the frame buffer and clear the display to white
     pub fn reset(&mut self) -> Result<(), Error> {
-        self.clear_frame_buffer(0xF)?;
+        self.clear(Gray4::WHITE)?;
         self.display(WaveformMode::Init)?;
-        Ok(())
-    }
-
-    /// set all pixel of the frame buffer to the value of raw_color
-    /// raw color must be in range 0..16
-    fn clear_frame_buffer(&mut self, raw_color: u16) -> Result<(), Error> {
-        let dev_info = self.get_dev_info();
-        let width = dev_info.panel_width;
-        let height = dev_info.panel_height;
-        let mem_addr = dev_info.memory_address;
-
-        let data_entry = raw_color << 12 | raw_color << 8 | raw_color << 4 | raw_color;
-
-        // we need to split the data in multiple transfers to keep the buffer size small
-        for w in 0..height {
-            self.load_image_area(
-                mem_addr,
-                MemoryConverterSetting {
-                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                    bit_per_pixel:
-                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-                },
-                &AreaImgInfo {
-                    area_x: 0,
-                    area_y: w,
-                    area_w: width,
-                    area_h: 1,
-                },
-                &vec![data_entry; width as usize / 4],
-            )?;
-        }
         Ok(())
     }
 
@@ -218,11 +187,12 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Loads a full frame into the controller frame buffer using the pixel preprocessor
     /// Warning: For the most usecases, the underlying spi transfer ist not capable to transfer a complete frame
     /// split the frame into multiple areas and use load_image_area instead
+    /// Data must be aligned to u16!
     pub fn load_image(
         &mut self,
         target_mem_addr: u32,
         image_settings: MemoryConverterSetting,
-        data: &[u16],
+        data: &[u8],
     ) -> Result<(), Error> {
         self.set_target_memory_addr(target_mem_addr)?;
 
@@ -245,7 +215,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         target_mem_addr: u32,
         image_settings: MemoryConverterSetting,
         area_info: &AreaImgInfo,
-        data: &[u16],
+        data: &[u8],
     ) -> Result<(), Error> {
         self.set_target_memory_addr(target_mem_addr)?;
 
@@ -302,7 +272,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     }
 
     /// Writes a buffer of u16 values to the given memory address in the controller ram
-    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u16]) -> Result<(), Error> {
+    /// Buffer needs to be aligned to u16!
+    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u8]) -> Result<(), Error> {
         let args = [
             memory_address as u16,
             (memory_address >> 16) as u16,
@@ -508,8 +479,18 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     type Error = Error;
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let raw_color = color.luma() as u16;
-        self.clear_frame_buffer(raw_color)
+        let info = self.get_dev_info();
+
+        self.fill_solid(
+            &Rectangle::new(
+                Point::zero(),
+                Size {
+                    width: info.panel_width as u32,
+                    height: info.panel_height as u32,
+                },
+            ),
+            color,
+        )
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
@@ -557,7 +538,18 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         let height = dev_info.panel_height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
-                let data: u16 = (color.luma() as u16) << ((coord.x % 4) * 4);
+                let mut data = [0x00, 0x00];
+
+                let value: u8 = color.luma() << ((coord.x % 2) * 4);
+                // little endian layout
+                // [P3, P2 | P1, P0]
+                if coord.x % 4 > 1 {
+                    // pixel 2 and 3
+                    data[0] = value;
+                } else {
+                    // pixel 0 and 1
+                    data[1] = value;
+                }
 
                 self.load_image_area(
                     dev_info.memory_address,
@@ -568,7 +560,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                         area_w: 1,
                         area_h: 1,
                     },
-                    &[data],
+                    &data,
                 )?;
             }
         }

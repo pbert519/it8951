@@ -9,21 +9,22 @@ use embedded_graphics_core::{
 pub struct AreaSerializer {
     area: Rectangle,
     rows_per_step: usize,
-    buffer: Vec<u16>,
+    buffer: Vec<u8>,
 }
 
 impl AreaSerializer {
     pub fn new(area: Rectangle, color: Gray4) -> Self {
-        let max_entries: usize = 512; // 1 KByte
+        let max_entries: usize = 1024; // 1 KByte
 
         Self::with_buffer_size(area, color, max_entries)
     }
     pub fn with_buffer_size(area: Rectangle, color: Gray4, buffer_size: usize) -> Self {
-        let raw_color: u16 = color.luma() as u16;
-        let data_entry = raw_color << 12 | raw_color << 8 | raw_color << 4 | raw_color;
+        let raw_color = color.luma();
+        let data_entry = raw_color << 4 | raw_color;
 
+        assert!(buffer_size % 2 == 0, "Buffer size must be aligned to u16");
         // calculate the buffer size
-        let entries_per_row = get_entires_per_row(area) as usize;
+        let entries_per_row = get_entires_per_row(area) as usize * 2; // convert length from u16 to u8
         let rows_per_step = (buffer_size / entries_per_row).min(area.size.height as usize);
         assert!(rows_per_step > 0, "Buffer size to small for one row");
         let buffer = vec![data_entry; entries_per_row * rows_per_step];
@@ -50,7 +51,7 @@ impl<'a> AreaSerializerIterator<'a> {
 }
 
 impl<'a> Iterator for AreaSerializerIterator<'a> {
-    type Item = (AreaImgInfo, &'a [u16]);
+    type Item = (AreaImgInfo, &'a [u8]);
 
     fn next(&mut self) -> Option<Self::Item> {
         let area_height = self.area_serializer.area.size.height;
@@ -108,7 +109,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -135,7 +136,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -161,7 +162,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -187,7 +188,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -215,7 +216,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -242,7 +243,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAAAAu16, 0xAAAAu16].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -261,7 +262,7 @@ mod tests {
         let area_s = AreaSerializer::with_buffer_size(
             area.intersection(&BOUNDING_BOX_DEFAULT),
             Gray4::new(0xA),
-            1,
+            2,
         );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
@@ -273,7 +274,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(
@@ -285,7 +286,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -304,7 +305,7 @@ mod tests {
         let area_s = AreaSerializer::with_buffer_size(
             area.intersection(&BOUNDING_BOX_DEFAULT),
             Gray4::new(0xA),
-            2,
+            4,
         );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
@@ -316,7 +317,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAAAAu16, 0xAAAAu16].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(
@@ -328,7 +329,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAAAAu16, 0xAAAAu16].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -355,7 +356,7 @@ mod tests {
                     area_w: 4,
                     area_h: 2
                 },
-                [0xAAAAu16, 0xAAAAu16].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -382,7 +383,7 @@ mod tests {
                     area_w: 3,
                     area_h: 2
                 },
-                [0xAAAAu16, 0xAAAAu16, 0xAAAAu16, 0xAAAAu16].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
@@ -409,7 +410,7 @@ mod tests {
                     area_w: 2,
                     area_h: 1
                 },
-                [0xAAAAu16].as_slice()
+                [0xAA, 0xAA].as_slice()
             ))
         );
         assert_eq!(s.next(), None);
