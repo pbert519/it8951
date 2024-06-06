@@ -47,6 +47,16 @@ pub struct MemoryConverterSetting {
     pub rotation: MemoryConverterRotation,
 }
 
+impl Default for MemoryConverterSetting {
+    fn default() -> Self {
+        Self {
+            endianness: MemoryConverterEndianness::LittleEndian,
+            bit_per_pixel: MemoryConverterBitPerPixel::BitsPerPixel4,
+            rotation: MemoryConverterRotation::Rotate0,
+        }
+    }
+}
+
 impl MemoryConverterSetting {
     pub(crate) fn into_arg(self) -> u16 {
         let endianness = self.endianness as u16;

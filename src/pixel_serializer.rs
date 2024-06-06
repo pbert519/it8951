@@ -1,4 +1,4 @@
-use crate::AreaImgInfo;
+use crate::{serialization_helper::get_entires_per_row, AreaImgInfo};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::Gray4,
@@ -7,6 +7,7 @@ use embedded_graphics_core::{
     Pixel,
 };
 
+/// Converts a list of Pixels (pos, color) into frame buffer segements with area information.
 pub struct PixelSerializer<I: Iterator<Item = Pixel<Gray4>>> {
     area: Rectangle,
     pixels: I,
@@ -46,10 +47,9 @@ impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
         let start_row = self.row;
 
         // prepare buffer with enough capacity
-        let entries_per_row =
-            ((self.area.size.width + (self.area.top_left.x % 4) as u32 + 3) / 4) as usize;
+        let entries_per_row = get_entires_per_row(self.area) as usize;
         let max_rows = (self.max_entries / entries_per_row).min(self.area.size.height as usize);
-        assert!(max_rows > 0, "Buffer size to smal for one row");
+        assert!(max_rows > 0, "Buffer size to small for one row");
         //let mut bytes = Vec::with_capacity(entries_per_row * max_rows);
         let mut bytes = vec![0x0000; entries_per_row * max_rows];
 
@@ -83,6 +83,8 @@ impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
     }
 }
 
+/// combines the color for each pixel with its position
+/// the iterator filters all pixels, which are not drawable
 pub fn convert_color_to_pixel_iterator<In: Iterator<Item = Gray4>>(
     area: Rectangle,
     bounding_box: Rectangle,

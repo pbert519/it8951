@@ -48,6 +48,9 @@ pub trait IT8951Interface {
 
     /// reset the controller
     fn reset(&mut self) -> Result<(), Error>;
+
+    /// wait
+    fn delay(&mut self, duration: core::time::Duration) -> Result<(), Error>;
 }
 
 /// Implements the controller interface for the spi hardware interface
@@ -203,6 +206,11 @@ where
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(200);
+        Ok(())
+    }
+
+    fn delay(&mut self, duration: core::time::Duration) -> Result<(), Error> {
+        self.delay.delay_us(duration.as_micros() as u32);
         Ok(())
     }
 }
