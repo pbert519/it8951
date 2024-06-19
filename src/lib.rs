@@ -118,6 +118,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
+    /// Since version 0.4.0, this function no longer resets the display
     pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.reset()?;
 
@@ -139,15 +140,11 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         it8951.dev_info = Some(dev_info);
 
-        // TODO check if necessary
-        it8951.reset()?;
-
         Ok(it8951)
     }
 
     /// Create a new Driver for are already active and initalized driver
     /// This can be usefull if the device was still powered on, but the uC restarts.
-    /// VCOM should be given on your display
     pub fn attach(interface: IT8951Interface) -> Result<IT8951<IT8951Interface, Run>, Error> {
         let mut it8951 = IT8951 {
             interface,
