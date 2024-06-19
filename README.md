@@ -20,15 +20,12 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - Support display engine fill area
 - Support display engine 1 bit per pixel mode
 - Support static buffer allocations
-- Make max buffer size configurable (default = 1kByte)
-- Make gpio busy timeout configurable (default = 10s)
-- Make lut timeout configurable (default = 10s)
-
 
 ## Changelog
 
 ### 0.4.0
+- **Public API** `new` expects a `Config` parameter to set timeout and buffer size. Default is implemented with timeouts of 15s and buffer size is 1024 Bytes.    
 - Buffer data type changed from u16 to u8
     - **Public API**: `load_image_area`, `load_image`, and `memory_burst_write` functions are now using u8 as buffer type
     - Memory usage is reduced by half (1kByte max. instead of 2kByte)
-- **Behavior** Calling `init` no longer clears the eink display. Instead call `reset` directly.    
+- **Behavior** Calling `init` no longer clears the eink display. Instead call `reset` directly.

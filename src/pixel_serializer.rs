@@ -18,24 +18,13 @@ pub struct PixelSerializer<I: Iterator<Item = Pixel<Gray4>>> {
 }
 
 impl<I: Iterator<Item = Pixel<Gray4>>> PixelSerializer<I> {
-    pub fn new(area: Rectangle, pixels: I) -> Self {
+    pub fn new(area: Rectangle, pixels: I, size: usize) -> Self {
         PixelSerializer {
             area,
             pixels,
             row: 0,
             // 1kByte
-            max_entries: 1024,
-        }
-    }
-    // max buffer size in bytes
-    // must be aligned to u16!
-    // TODO make variable buffer size available via public api
-    #[allow(unused)]
-    pub fn with_buffer_max_words(self, size: usize) -> Self {
-        assert!(size % 2 == 0, "Buffer size must be aligned to u16");
-        Self {
             max_entries: size,
-            ..self
         }
     }
 }
@@ -137,6 +126,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xF)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -170,6 +160,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0x1)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -202,6 +193,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0x4)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -234,6 +226,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xC)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -273,6 +266,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -306,6 +300,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xC), Gray4::new(0xD), Gray4::new(0xE)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -349,8 +344,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        )
-        .with_buffer_max_words(2);
+            2,
+        );
         assert_eq!(
             s.next(),
             Some((
@@ -403,8 +398,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        )
-        .with_buffer_max_words(4);
+            4,
+        );
         assert_eq!(
             s.next(),
             Some((
@@ -459,6 +454,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -500,6 +496,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -541,6 +538,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),

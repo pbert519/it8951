@@ -22,6 +22,10 @@ pub enum Error {
 /// Trait to describe the interface with the controller
 /// The controller supports different hardware interfaces like i2c, usb, spi and i80
 pub trait IT8951Interface {
+    /// set wait timeout
+    /// internally used by the library
+    fn set_busy_timeout(&mut self, timeout: core::time::Duration);
+
     /// active wait while the controller is busy and no new transactions should be issued
     fn wait_while_busy(&mut self) -> Result<(), Error>;
 
@@ -64,6 +68,7 @@ pub struct IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
     busy: BUSY,
     rst: RST,
     delay: DELAY,
+    timeout: core::time::Duration,
 }
 
 impl<SPI, BUSY, RST, DELAY> IT8951SPIInterface<SPI, BUSY, RST, DELAY>
@@ -85,6 +90,7 @@ where
             busy,
             rst,
             delay,
+            timeout: core::time::Duration::default(),
         }
     }
 }
@@ -96,6 +102,10 @@ where
     RST: OutputPin,
     DELAY: DelayNs,
 {
+    fn set_busy_timeout(&mut self, timeout: core::time::Duration) {
+        self.timeout = timeout
+    }
+
     fn wait_while_busy(&mut self) -> Result<(), Error> {
         let mut counter = 0u64;
         while self.busy.is_low().map_err(|_| Error::GPIOError)? {

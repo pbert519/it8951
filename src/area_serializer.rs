@@ -13,12 +13,7 @@ pub struct AreaSerializer {
 }
 
 impl AreaSerializer {
-    pub fn new(area: Rectangle, color: Gray4) -> Self {
-        let max_entries: usize = 1024; // 1 KByte
-
-        Self::with_buffer_size(area, color, max_entries)
-    }
-    pub fn with_buffer_size(area: Rectangle, color: Gray4, buffer_size: usize) -> Self {
+    pub fn new(area: Rectangle, color: Gray4, buffer_size: usize) -> Self {
         let raw_color = color.luma();
         let data_entry = raw_color << 4 | raw_color;
 
@@ -98,7 +93,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -125,7 +124,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -151,7 +154,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -177,7 +184,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -204,7 +215,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
 
         assert_eq!(
@@ -232,7 +247,11 @@ mod tests {
                 height: 1,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -259,11 +278,8 @@ mod tests {
                 height: 2,
             },
         };
-        let area_s = AreaSerializer::with_buffer_size(
-            area.intersection(&BOUNDING_BOX_DEFAULT),
-            Gray4::new(0xA),
-            2,
-        );
+        let area_s =
+            AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA), 2);
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -302,11 +318,8 @@ mod tests {
                 height: 2,
             },
         };
-        let area_s = AreaSerializer::with_buffer_size(
-            area.intersection(&BOUNDING_BOX_DEFAULT),
-            Gray4::new(0xA),
-            4,
-        );
+        let area_s =
+            AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA), 4);
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -345,7 +358,11 @@ mod tests {
                 height: 2,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -372,7 +389,11 @@ mod tests {
                 height: 2,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),
@@ -399,7 +420,11 @@ mod tests {
                 height: 2,
             },
         };
-        let area_s = AreaSerializer::new(area.intersection(&BOUNDING_BOX_DEFAULT), Gray4::new(0xA));
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0xA),
+            1024,
+        );
         let mut s = AreaSerializerIterator::new(&area_s);
         assert_eq!(
             s.next(),

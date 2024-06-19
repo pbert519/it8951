@@ -37,6 +37,29 @@ impl From<interface::Error> for Error {
     }
 }
 
+/// Driver configuration
+pub struct Config {
+    /// Timeout for the internal display engine
+    pub timeout_display_engine: core::time::Duration,
+    /// Timeout for the busy pin
+    pub timeout_interface: core::time::Duration,
+    /// Max buffer size in bytes for staging buffers
+    /// The buffer should be large enough to at least contain the pixels of a complete row
+    /// The buffer must be aligned to u16
+    /// The used IT8951 interface must support to write a complete buffer at once
+    pub max_buffer_size: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            timeout_display_engine: core::time::Duration::from_secs(15),
+            timeout_interface: core::time::Duration::from_secs(15),
+            max_buffer_size: 1024,
+        }
+    }
+}
+
 /// Device Info Struct
 /// Describes the connected display
 #[derive(Debug, Clone)]
@@ -103,16 +126,19 @@ pub struct IT8951<IT8951Interface, State> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
+    config: Config,
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    pub fn new(interface: IT8951Interface) -> Self {
+    pub fn new(mut interface: IT8951Interface, config: Config) -> Self {
+        interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            config,
         }
     }
 
@@ -126,6 +152,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         }
         .sys_run()?;
 
@@ -145,11 +172,17 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
     /// Create a new Driver for are already active and initalized driver
     /// This can be usefull if the device was still powered on, but the uC restarts.
-    pub fn attach(interface: IT8951Interface) -> Result<IT8951<IT8951Interface, Run>, Error> {
+    pub fn attach(
+        mut interface: IT8951Interface,
+        config: Config,
+    ) -> Result<IT8951<IT8951Interface, Run>, Error> {
+        interface.set_busy_timeout(config.timeout_interface);
+
         let mut it8951 = IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            config,
         }
         .sys_run()?;
 
@@ -358,9 +391,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
+        let timeout = self.config.timeout_display_engine.as_micros() as u64;
         let mut counter = 0u64;
         while 0 != self.read_register(register::LUTAFSR)? {
-            if counter > 10_000_000u64 {
+            if counter > timeout {
                 return Err(Error::DisplayEngineTimeout);
             }
             counter += 1;
@@ -377,6 +411,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 
@@ -388,6 +423,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 
@@ -462,6 +498,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 }
@@ -491,7 +528,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        let a = AreaSerializer::new(*area, color);
+        let a = AreaSerializer::new(*area, color, self.config.max_buffer_size);
         let area_iter = AreaSerializerIterator::new(&a);
 
         for (area_img_info, buffer) in area_iter {
@@ -512,7 +549,11 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     {
         let iter = convert_color_to_pixel_iterator(*area, self.bounding_box(), colors.into_iter());
 
-        let pixel = PixelSerializer::new(area.intersection(&self.bounding_box()), iter);
+        let pixel = PixelSerializer::new(
+            area.intersection(&self.bounding_box()),
+            iter,
+            self.config.max_buffer_size,
+        );
 
         for (area_img_info, buffer) in pixel {
             let dev_info = self.get_dev_info();
