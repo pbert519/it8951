@@ -2,6 +2,7 @@ use esp_idf_hal::{delay::Ets, gpio::PinDriver, prelude::*, spi::*};
 use esp_idf_sys as _; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 use it8951::{interface::*, *};
 use embedded_graphics::{prelude::*, primitives::{Rectangle, PrimitiveStyle}, pixelcolor::Gray4};
+use it8951::Config;
 
 fn main() -> ! {
     // Bind the log crate to the ESP Logging facilities
@@ -33,7 +34,7 @@ fn main() -> ! {
         reset,
         Ets,
     );
-    let mut epd = IT8951::new(display_interface).init(1605).unwrap();
+    let mut epd = IT8951::new(display_interface, Config::default()).init(1605).unwrap();
 
     log::info!("Initialized display: {:?}", epd.get_dev_info());
 

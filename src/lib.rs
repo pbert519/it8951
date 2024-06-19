@@ -37,6 +37,29 @@ impl From<interface::Error> for Error {
     }
 }
 
+/// Driver configuration
+pub struct Config {
+    /// Timeout for the internal display engine
+    pub timeout_display_engine: core::time::Duration,
+    /// Timeout for the busy pin
+    pub timeout_interface: core::time::Duration,
+    /// Max buffer size in bytes for staging buffers
+    /// The buffer should be large enough to at least contain the pixels of a complete row
+    /// The buffer must be aligned to u16
+    /// The used IT8951 interface must support to write a complete buffer at once
+    pub max_buffer_size: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            timeout_display_engine: core::time::Duration::from_secs(15),
+            timeout_interface: core::time::Duration::from_secs(15),
+            max_buffer_size: 1024,
+        }
+    }
+}
+
 /// Device Info Struct
 /// Describes the connected display
 #[derive(Debug, Clone)]
@@ -103,21 +126,25 @@ pub struct IT8951<IT8951Interface, State> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
+    config: Config,
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    pub fn new(interface: IT8951Interface) -> Self {
+    pub fn new(mut interface: IT8951Interface, config: Config) -> Self {
+        interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            config,
         }
     }
 
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
+    /// Since version 0.4.0, this function no longer resets the display
     pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.reset()?;
 
@@ -125,6 +152,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         }
         .sys_run()?;
 
@@ -139,19 +167,22 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         it8951.dev_info = Some(dev_info);
 
-        it8951.reset()?;
-
         Ok(it8951)
     }
 
     /// Create a new Driver for are already active and initalized driver
     /// This can be usefull if the device was still powered on, but the uC restarts.
-    /// VCOM should be given on your display
-    pub fn attach(interface: IT8951Interface) -> Result<IT8951<IT8951Interface, Run>, Error> {
+    pub fn attach(
+        mut interface: IT8951Interface,
+        config: Config,
+    ) -> Result<IT8951<IT8951Interface, Run>, Error> {
+        interface.set_busy_timeout(config.timeout_interface);
+
         let mut it8951 = IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            config,
         }
         .sys_run()?;
 
@@ -176,40 +207,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
     /// initalize the frame buffer and clear the display to white
     pub fn reset(&mut self) -> Result<(), Error> {
-        self.clear_frame_buffer(0xF)?;
+        self.clear(Gray4::WHITE)?;
         self.display(WaveformMode::Init)?;
-        Ok(())
-    }
-
-    /// set all pixel of the frame buffer to the value of raw_color
-    /// raw color must be in range 0..16
-    fn clear_frame_buffer(&mut self, raw_color: u16) -> Result<(), Error> {
-        let dev_info = self.get_dev_info();
-        let width = dev_info.panel_width;
-        let height = dev_info.panel_height;
-        let mem_addr = dev_info.memory_address;
-
-        let data_entry = raw_color << 12 | raw_color << 8 | raw_color << 4 | raw_color;
-
-        // we need to split the data in multiple transfers to keep the buffer size small
-        for w in 0..height {
-            self.load_image_area(
-                mem_addr,
-                MemoryConverterSetting {
-                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
-                    bit_per_pixel:
-                        memory_converter_settings::MemoryConverterBitPerPixel::BitsPerPixel4,
-                    rotation: memory_converter_settings::MemoryConverterRotation::Rotate0,
-                },
-                &AreaImgInfo {
-                    area_x: 0,
-                    area_y: w,
-                    area_w: width,
-                    area_h: 1,
-                },
-                &vec![data_entry; width as usize / 4],
-            )?;
-        }
         Ok(())
     }
 
@@ -218,11 +217,12 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Loads a full frame into the controller frame buffer using the pixel preprocessor
     /// Warning: For the most usecases, the underlying spi transfer ist not capable to transfer a complete frame
     /// split the frame into multiple areas and use load_image_area instead
+    /// Data must be aligned to u16!
     pub fn load_image(
         &mut self,
         target_mem_addr: u32,
         image_settings: MemoryConverterSetting,
-        data: &[u16],
+        data: &[u8],
     ) -> Result<(), Error> {
         self.set_target_memory_addr(target_mem_addr)?;
 
@@ -245,7 +245,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         target_mem_addr: u32,
         image_settings: MemoryConverterSetting,
         area_info: &AreaImgInfo,
-        data: &[u16],
+        data: &[u8],
     ) -> Result<(), Error> {
         self.set_target_memory_addr(target_mem_addr)?;
 
@@ -302,7 +302,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     }
 
     /// Writes a buffer of u16 values to the given memory address in the controller ram
-    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u16]) -> Result<(), Error> {
+    /// Buffer needs to be aligned to u16!
+    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u8]) -> Result<(), Error> {
         let args = [
             memory_address as u16,
             (memory_address >> 16) as u16,
@@ -390,9 +391,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     // misc  ------------------------------------------------------------------------------------------------
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
+        let timeout = self.config.timeout_display_engine.as_micros() as u64;
         let mut counter = 0u64;
         while 0 != self.read_register(register::LUTAFSR)? {
-            if counter > 10_000_000u64 {
+            if counter > timeout {
                 return Err(Error::DisplayEngineTimeout);
             }
             counter += 1;
@@ -409,6 +411,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 
@@ -420,6 +423,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 
@@ -494,6 +498,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            config: self.config,
         })
     }
 }
@@ -508,12 +513,22 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     type Error = Error;
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let raw_color = color.luma() as u16;
-        self.clear_frame_buffer(raw_color)
+        let info = self.get_dev_info();
+
+        self.fill_solid(
+            &Rectangle::new(
+                Point::zero(),
+                Size {
+                    width: info.panel_width as u32,
+                    height: info.panel_height as u32,
+                },
+            ),
+            color,
+        )
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        let a = AreaSerializer::new(*area, color);
+        let a = AreaSerializer::new(*area, color, self.config.max_buffer_size);
         let area_iter = AreaSerializerIterator::new(&a);
 
         for (area_img_info, buffer) in area_iter {
@@ -534,7 +549,11 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     {
         let iter = convert_color_to_pixel_iterator(*area, self.bounding_box(), colors.into_iter());
 
-        let pixel = PixelSerializer::new(area.intersection(&self.bounding_box()), iter);
+        let pixel = PixelSerializer::new(
+            area.intersection(&self.bounding_box()),
+            iter,
+            self.config.max_buffer_size,
+        );
 
         for (area_img_info, buffer) in pixel {
             let dev_info = self.get_dev_info();
@@ -557,7 +576,18 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         let height = dev_info.panel_height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
-                let data: u16 = (color.luma() as u16) << ((coord.x % 4) * 4);
+                let mut data = [0x00, 0x00];
+
+                let value: u8 = color.luma() << ((coord.x % 2) * 4);
+                // little endian layout
+                // [P3, P2 | P1, P0]
+                if coord.x % 4 > 1 {
+                    // pixel 2 and 3
+                    data[0] = value;
+                } else {
+                    // pixel 0 and 1
+                    data[1] = value;
+                }
 
                 self.load_image_area(
                     dev_info.memory_address,
@@ -568,7 +598,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                         area_w: 1,
                         area_h: 1,
                     },
-                    &[data],
+                    &data,
                 )?;
             }
         }

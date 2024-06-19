@@ -1,3 +1,4 @@
+use it8951::Config;
 use linux_embedded_hal::gpio_cdev::{Chip, LineRequestFlags};
 use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
 use linux_embedded_hal::{CdevPin, Delay, SpidevDevice};
@@ -34,7 +35,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let busy = CdevPin::new(busy_input_handle)?;
 
     let driver = it8951::interface::IT8951SPIInterface::new(spi, busy, rst, Delay);
-    let mut epd = it8951::IT8951::new(driver).init(1670).unwrap();
+    let mut epd = it8951::IT8951::new(driver, Config::default())
+        .init(1670)
+        .unwrap();
 
     println!(
         "Reset and initalized E-Ink Display: \n\r {:?}",

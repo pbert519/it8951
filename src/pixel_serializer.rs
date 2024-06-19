@@ -1,3 +1,5 @@
+use core::ops::BitXor;
+
 use crate::{serialization_helper::get_entires_per_row, AreaImgInfo};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
@@ -16,28 +18,19 @@ pub struct PixelSerializer<I: Iterator<Item = Pixel<Gray4>>> {
 }
 
 impl<I: Iterator<Item = Pixel<Gray4>>> PixelSerializer<I> {
-    pub fn new(area: Rectangle, pixels: I) -> Self {
+    pub fn new(area: Rectangle, pixels: I, size: usize) -> Self {
         PixelSerializer {
             area,
             pixels,
             row: 0,
-            // 512 * 2 Bytes = 1kByte
-            max_entries: 512,
-        }
-    }
-    // max buffer size in 16bit words
-    // TODO make variable buffer size available via public api
-    #[allow(unused)]
-    pub fn with_buffer_max_words(self, size: usize) -> Self {
-        Self {
+            // 1kByte
             max_entries: size,
-            ..self
         }
     }
 }
 
 impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
-    type Item = (AreaImgInfo, Vec<u16>);
+    type Item = (AreaImgInfo, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.row >= self.area.size.height as usize {
@@ -47,19 +40,25 @@ impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
         let start_row = self.row;
 
         // prepare buffer with enough capacity
-        let entries_per_row = get_entires_per_row(self.area) as usize;
+        let entries_per_row = get_entires_per_row(self.area) as usize * 2; // convert length to bytes
         let max_rows = (self.max_entries / entries_per_row).min(self.area.size.height as usize);
         assert!(max_rows > 0, "Buffer size to small for one row");
-        //let mut bytes = Vec::with_capacity(entries_per_row * max_rows);
-        let mut bytes = vec![0x0000; entries_per_row * max_rows];
+        let mut bytes = vec![0x00; entries_per_row * max_rows];
 
         // add all pixels to buffer
         for Pixel(point, color) in self.pixels.by_ref() {
-            let byte_pos = ((point.x - (self.area.top_left.x / 4 * 4)) / 4) as usize
+            // calculate the which u16 (pair of two bytes) the pixel is in
+            let u16_pos = ((point.x - (self.area.top_left.x / 4 * 4)) / 2) as usize
                 + entries_per_row * (self.row - start_row);
-            let bit_pos = (point.x % 4) * 4;
 
-            bytes[byte_pos] |= (color.luma() as u16) << bit_pos;
+            // swap last pixel to map little endian behavior
+            let byte_pos = u16_pos.bitxor(0x00001);
+
+            // little endian layout
+            // [P3, P2 | P1, P0]
+            let bit_pos = (point.x % 2) * 4;
+
+            bytes[byte_pos] |= (color.luma()) << bit_pos;
 
             //  end of row
             if point.x >= self.area.top_left.x + self.area.size.width as i32 - 1 {
@@ -127,6 +126,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xF)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -137,7 +137,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                vec![0x000F]
+                vec![0x00, 0x0F]
             ))
         );
         assert_eq!(s.next(), None);
@@ -160,6 +160,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0x1)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -170,7 +171,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                vec![0x0010]
+                vec![0x00, 0x10]
             ))
         );
         assert_eq!(s.next(), None);
@@ -192,6 +193,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0x4)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -202,7 +204,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                vec![0x0400]
+                vec![0x04, 0x00]
             ))
         );
         assert_eq!(s.next(), None);
@@ -224,6 +226,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xC)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -234,7 +237,7 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                vec![0xC000]
+                vec![0xC0, 0x00]
             ))
         );
         assert_eq!(s.next(), None);
@@ -263,6 +266,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -273,7 +277,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                vec![0xDCBA]
+                vec![0xDC, 0xBA]
             ))
         );
         assert_eq!(s.next(), None);
@@ -296,6 +300,7 @@ mod tests {
                 BOUNDING_BOX_DEFAULT,
                 vec![Gray4::new(0xC), Gray4::new(0xD), Gray4::new(0xE)].into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -306,7 +311,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                vec![0xC000, 0x00ED]
+                vec![0xC0, 0x00, 0x00, 0xED]
             ))
         );
         assert_eq!(s.next(), None);
@@ -339,8 +344,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        )
-        .with_buffer_max_words(1);
+            2,
+        );
         assert_eq!(
             s.next(),
             Some((
@@ -350,7 +355,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                vec![0xDCBA]
+                vec![0xDC, 0xBA]
             ))
         );
         assert_eq!(
@@ -362,7 +367,7 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                vec![0x4321]
+                vec![0x43, 0x21]
             ))
         );
         assert_eq!(s.next(), None);
@@ -393,8 +398,8 @@ mod tests {
                 ]
                 .into_iter(),
             ),
-        )
-        .with_buffer_max_words(2);
+            4,
+        );
         assert_eq!(
             s.next(),
             Some((
@@ -404,7 +409,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                vec![0xC000, 0x00ED]
+                vec![0xC0, 0x00, 0x00, 0xED]
             ))
         );
         assert_eq!(
@@ -416,7 +421,7 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                vec![0x1000, 0x0032]
+                vec![0x10, 0x00, 0x00, 0x32]
             ))
         );
         assert_eq!(s.next(), None);
@@ -449,6 +454,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -459,7 +465,7 @@ mod tests {
                     area_w: 4,
                     area_h: 2
                 },
-                vec![0xDCBA, 0x4321]
+                vec![0xDC, 0xBA, 0x43, 0x21]
             ))
         );
         assert_eq!(s.next(), None);
@@ -490,6 +496,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -500,7 +507,7 @@ mod tests {
                     area_w: 3,
                     area_h: 2
                 },
-                vec![0xC000, 0x00ED, 0x1000, 0x0032]
+                vec![0xC0, 0x00, 0x00, 0xED, 0x10, 0x00, 0x00, 0x32]
             ))
         );
         assert_eq!(s.next(), None);
@@ -531,6 +538,7 @@ mod tests {
                 ]
                 .into_iter(),
             ),
+            1024,
         );
         assert_eq!(
             s.next(),
@@ -541,7 +549,7 @@ mod tests {
                     area_w: 2,
                     area_h: 1
                 },
-                vec![0x0032]
+                vec![0x00, 0x32]
             ))
         );
         assert_eq!(s.next(), None);
