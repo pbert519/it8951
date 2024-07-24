@@ -528,7 +528,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
-        let a = AreaSerializer::new(*area, color, self.config.max_buffer_size);
+        // only update visible content
+        let area = area.intersection(&self.bounding_box());
+        // if the area is zero sized, skip drawing
+        if area.is_zero_sized() {
+            return Ok(());
+        }
+
+        let a = AreaSerializer::new(area, color, self.config.max_buffer_size);
         let area_iter = AreaSerializerIterator::new(&a);
 
         for (area_img_info, buffer) in area_iter {

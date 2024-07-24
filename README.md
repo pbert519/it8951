@@ -23,6 +23,10 @@ This driver can be used with the embedded graphics trait, currently only suppori
 
 ## Changelog
 
+### 0.4.1
+- fix divide by zero in fill_solid for zero sized area
+- fill_solid correctly skip limit areas to the display bounds
+
 ### 0.4.0
 - **Public API** `new` expects a `Config` parameter to set timeout and buffer size. Default is implemented with timeouts of 15s and buffer size is 1024 Bytes.    
 - Buffer data type changed from u16 to u8
