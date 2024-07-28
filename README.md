@@ -20,6 +20,8 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - Support display engine fill area
 - Support display engine 1 bit per pixel mode
 - Support static buffer allocations
+- Use 1bbp or 2 bpp if possible
+
 
 ## Changelog
 

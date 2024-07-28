@@ -1,8 +1,15 @@
+use embedded_graphics::{
+    pixelcolor::Gray4,
+    prelude::*,
+    primitives::{PrimitiveStyle, Rectangle},
+};
 use esp_idf_hal::{delay::Ets, gpio::PinDriver, prelude::*, spi::*};
 use esp_idf_sys as _; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 use it8951::{interface::*, *};
 use embedded_graphics::{prelude::*, primitives::{Rectangle, PrimitiveStyle}, pixelcolor::Gray4};
 use it8951::Config;
+
+mod demo;
 
 fn main() -> ! {
     // Bind the log crate to the ESP Logging facilities
@@ -65,10 +72,14 @@ fn main() -> ! {
 
     epd.display(it8951::WaveformMode::GL16).unwrap();
 
+    demo::run(&mut epd);
 
-    let epd = epd.standby().unwrap();
+    let _epd = epd.standby().unwrap();
 
-    loop {}
+    loop {
+        println!("Reached main loop, sleep!");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
 
 fn setup_watchdog() -> Result<(), esp_idf_sys::EspError> {
