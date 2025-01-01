@@ -90,7 +90,7 @@ where
             busy,
             rst,
             delay,
-            timeout: core::time::Duration::default(),
+            timeout: core::time::Duration::from_secs(1),
         }
     }
 }
@@ -106,14 +106,37 @@ where
         self.timeout = timeout
     }
 
+    /*
+       Exponential backoff eventually switches to longer delay.
+       When ussed with FreeRtos Delay, longer delay allows for other tasks to
+       execute instead of busy-loop for longer screen operations
+    */
     fn wait_while_busy(&mut self) -> Result<(), Error> {
-        let mut counter = 0u64;
+        let timeout_us = self.timeout.as_micros() as u32;
+
+        // Cap max backoff so we won't overshoot timeout significantly
+        // Set approximately to free-rtos tick to allow for other tasks to run
+        const BACKOFF_CAP_US: u32 = 1000;
+
+        let mut delay_us = 200_u32;
+
+        // This is estimation of total wait time,
+        // Prone to under-estimating but good enough for what it is for
+        let mut accumulated_delay_us = 0_u32;
+
         while self.busy.is_low().map_err(|_| Error::GPIOError)? {
-            if counter > 10_000_000u64 {
+            if accumulated_delay_us > timeout_us {
+                log::error!(
+                    "Timed out waiting for busy pin after ~{} us",
+                    accumulated_delay_us
+                );
                 return Err(Error::BusyTimeout);
             }
-            counter += 1;
-            self.delay.delay_us(1);
+            self.delay.delay_us(delay_us);
+            accumulated_delay_us += delay_us;
+            if delay_us < BACKOFF_CAP_US {
+                delay_us = delay_us * 2;
+            }
         }
         Ok(())
     }
