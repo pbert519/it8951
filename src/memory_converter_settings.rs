@@ -62,7 +62,7 @@ impl Default for MemoryConverterSetting {
 }
 
 impl MemoryConverterSetting {
-    pub(crate) fn into_arg(&self) -> u16 {
+    pub(crate) fn into_arg(self) -> u16 {
         let endianness = self.endianness as u16;
         let bit_per_pixel = self.bit_per_pixel as u16;
         let rotation = self.rotation as u16;

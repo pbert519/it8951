@@ -135,7 +135,7 @@ where
             self.delay.delay_us(delay_us);
             accumulated_delay_us += delay_us;
             if delay_us < BACKOFF_CAP_US {
-                delay_us = delay_us * 2;
+                delay_us *= 2;
             }
         }
         Ok(())

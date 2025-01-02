@@ -352,7 +352,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         area_info: &AreaImgInfo,
         mode: WaveformMode,
     ) -> Result<(), Error> {
-        let area_info = self.rotate_area_info(&area_info);
+        let area_info = self.rotate_area_info(area_info);
 
         self.wait_for_display_ready()?;
         let args = [
@@ -376,7 +376,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         mode: WaveformMode,
         target_mem_addr: u32,
     ) -> Result<(), Error> {
-        let area_info = self.rotate_area_info(&area_info);
+        let area_info = self.rotate_area_info(area_info);
         let args = [
             area_info.area_x,
             area_info.area_y,
@@ -548,8 +548,8 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
             &Rectangle::new(
                 Point::zero(),
                 Size {
-                    width: size.width as u32,
-                    height: size.height as u32,
+                    width: size.width,
+                    height: size.height,
                 },
             ),
             color,
