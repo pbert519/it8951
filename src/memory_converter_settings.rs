@@ -2,6 +2,7 @@
 
 /// Endianness of the pixel data send to the controller
 #[repr(u16)]
+#[derive(Clone, Copy)]
 pub enum MemoryConverterEndianness {
     /// pixel data is little endian
     LittleEndian = 0,
@@ -12,6 +13,7 @@ pub enum MemoryConverterEndianness {
 /// Bits per pixel
 /// the pixel data send to the controller can encode the pixels with a different number of bits
 #[repr(u16)]
+#[derive(Clone, Copy)]
 pub enum MemoryConverterBitPerPixel {
     /// each pixel value is given by 2 bits
     BitsPerPixel2 = 0b00,
@@ -25,6 +27,7 @@ pub enum MemoryConverterBitPerPixel {
 
 /// The memory converter supports rotating the written pixel data
 #[repr(u16)]
+#[derive(Clone, Copy)]
 pub enum MemoryConverterRotation {
     /// dont rotate image
     Rotate0 = 0b00,
@@ -38,6 +41,7 @@ pub enum MemoryConverterRotation {
 
 /// Memory converter settings
 /// pixel data send by the load_image commands can be converted by the controller
+#[derive(Clone, Copy)]
 pub struct MemoryConverterSetting {
     /// pixel data endianess
     pub endianness: MemoryConverterEndianness,
@@ -58,7 +62,7 @@ impl Default for MemoryConverterSetting {
 }
 
 impl MemoryConverterSetting {
-    pub(crate) fn into_arg(self) -> u16 {
+    pub(crate) fn into_arg(&self) -> u16 {
         let endianness = self.endianness as u16;
         let bit_per_pixel = self.bit_per_pixel as u16;
         let rotation = self.rotation as u16;
