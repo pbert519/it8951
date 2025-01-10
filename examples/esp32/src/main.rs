@@ -1,8 +1,14 @@
+use std::time::Duration;
+
+use embedded_graphics::{
+    pixelcolor::Gray4,
+    prelude::*,
+    primitives::{PrimitiveStyle, Rectangle},
+};
 use esp_idf_hal::{delay::Ets, gpio::PinDriver, prelude::*, spi::*};
 use esp_idf_sys as _; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
-use it8951::{interface::*, *};
-use embedded_graphics::{prelude::*, primitives::{Rectangle, PrimitiveStyle}, pixelcolor::Gray4};
 use it8951::Config;
+use it8951::{interface::*, *};
 
 fn main() -> ! {
     // Bind the log crate to the ESP Logging facilities
@@ -34,18 +40,16 @@ fn main() -> ! {
         reset,
         Ets,
     );
-    let mut epd = IT8951::new(display_interface, Config::default()).init(1605).unwrap();
+    let mut epd = IT8951::new(display_interface, Config::default())
+        .init(1605)
+        .unwrap();
+    epd.reset().unwrap();
 
     log::info!("Initialized display: {:?}", epd.get_dev_info());
 
     // Draw a filled square
     Rectangle::new(Point::new(50, 350), Size::new(20, 20))
         .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
-        .draw(&mut epd)
-        .unwrap();
-
-    Rectangle::new(Point::new(0, 1000), Size::new(200, 200))
-        .into_styled(PrimitiveStyle::with_fill(Gray4::new(8)))
         .draw(&mut epd)
         .unwrap();
 
@@ -64,15 +68,45 @@ fn main() -> ! {
     .unwrap();
 
     epd.display(it8951::WaveformMode::GL16).unwrap();
+    let mut sleppy_epd = epd.sleep().unwrap();
 
+    let mut xpos = -200;
 
-    let epd = epd.standby().unwrap();
+    loop {
+        std::thread::sleep(Duration::from_millis(1000));
 
-    loop {}
+        // wakeup display
+        let mut epd = sleppy_epd.sys_run().unwrap();
+
+        // clear old rectangle
+        Rectangle::new(Point::new(xpos, 1000), Size::new(200, 200))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::WHITE))
+        .draw(&mut epd)
+        .unwrap();
+
+        // update rectangle pos
+        if xpos >= epd.size().width as i32 {
+            xpos = -200;
+        } else {
+            xpos +=10;
+        }
+
+        // draw new rectangle
+        Rectangle::new(Point::new(xpos, 1000), Size::new(200, 200))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
+        .draw(&mut epd)
+        .unwrap();
+
+        // Update screen
+        epd.display(it8951::WaveformMode::A2).unwrap();
+
+        // sleep display
+        sleppy_epd = epd.sleep().unwrap();
+    }
 }
 
 fn setup_watchdog() -> Result<(), esp_idf_sys::EspError> {
-    // Setup watchdog to 120s
+    // Setup watchdog to 45s
     unsafe {
         esp_idf_sys::esp!(esp_idf_sys::esp_task_wdt_reconfigure(
             &esp_idf_sys::esp_task_wdt_config_t {
