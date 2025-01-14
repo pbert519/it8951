@@ -126,10 +126,6 @@ where
 
         while self.busy.is_low().map_err(|_| Error::GPIOError)? {
             if accumulated_delay_us > timeout_us {
-                log::error!(
-                    "Timed out waiting for busy pin after ~{} us",
-                    accumulated_delay_us
-                );
                 return Err(Error::BusyTimeout);
             }
             self.delay.delay_us(delay_us);
@@ -138,6 +134,7 @@ where
                 delay_us *= 2;
             }
         }
+
         Ok(())
     }
 
