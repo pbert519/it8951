@@ -1,5 +1,7 @@
 //! Settings for the pixel preprocessing / memory converter unit on the controller
 
+use crate::Rotation;
+
 /// Endianness of the pixel data send to the controller
 #[repr(u16)]
 #[derive(Clone, Copy)]
@@ -67,5 +69,16 @@ impl MemoryConverterSetting {
         let bit_per_pixel = self.bit_per_pixel as u16;
         let rotation = self.rotation as u16;
         (endianness << 8) | (bit_per_pixel << 4) | rotation
+    }
+}
+
+impl From<Rotation> for MemoryConverterRotation {
+    fn from(rotation: Rotation) -> Self {
+        match rotation {
+            Rotation::Rotate0 => MemoryConverterRotation::Rotate0,
+            Rotation::Rotate90 => MemoryConverterRotation::Rotate90,
+            Rotation::Rotate180 => MemoryConverterRotation::Rotate180,
+            Rotation::Rotate270 => MemoryConverterRotation::Rotate270,
+        }
     }
 }

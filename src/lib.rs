@@ -111,6 +111,20 @@ pub enum WaveformMode {
     DU4 = 7,
 }
 
+/// Sets hardware rotation used by controller
+/// This will perform approriate rotation for all public interfaces exposed by the driver
+/// Including bounding boxes, pixel, and image drawing
+pub enum Rotation {
+    /// No rotation
+    Rotate0,
+    /// Rotate 90 degree
+    Rotate90,
+    /// Rotate 180 degree
+    Rotate180,
+    /// Rotate 270 degree
+    Rotate270,
+}
+
 /// Normal Operation
 pub struct Run;
 /// The device is either in sleep or standby mode:
@@ -146,16 +160,16 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
     pub fn new(interface: IT8951Interface, config: Config) -> Self {
-        Self::new_with_mcs(interface, config, MemoryConverterSetting::default())
+        Self::new_with_rotation(interface, config, Rotation::Rotate0)
     }
 
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    /// Allows to set custom MemoryConverterSetting to specify rotation
-    pub fn new_with_mcs(
+    /// Allows to set rotation
+    pub fn new_with_rotation(
         mut interface: IT8951Interface,
         config: Config,
-        mcs: MemoryConverterSetting,
+        rotation: Rotation,
     ) -> Self {
         interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
@@ -163,7 +177,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             dev_info: None,
             marker: PhantomData {},
             config,
-            memory_converter_settings: mcs,
+            memory_converter_settings: MemoryConverterSetting{
+                rotation: rotation.into(),
+                ..MemoryConverterSetting::default()
+            },
         }
     }
 
