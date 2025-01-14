@@ -48,6 +48,8 @@ pub struct Config {
     /// The buffer must be aligned to u16
     /// The used IT8951 interface must support to write a complete buffer at once
     pub max_buffer_size: usize,
+    /// Display rotation
+    pub rotation: Rotation,
 }
 
 impl Default for Config {
@@ -56,6 +58,7 @@ impl Default for Config {
             timeout_display_engine: core::time::Duration::from_secs(15),
             timeout_interface: core::time::Duration::from_secs(15),
             max_buffer_size: 1024,
+            rotation: Rotation::Rotate0,
         }
     }
 }
@@ -141,7 +144,6 @@ pub struct IT8951<IT8951Interface, State> {
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
     config: Config,
-    memory_converter_settings: MemoryConverterSetting,
 }
 
 impl<IT8951Interface: interface::IT8951Interface, TState> IT8951<IT8951Interface, TState> {
@@ -151,7 +153,6 @@ impl<IT8951Interface: interface::IT8951Interface, TState> IT8951<IT8951Interface
             dev_info: self.dev_info,
             marker: PhantomData {},
             config: self.config,
-            memory_converter_settings: self.memory_converter_settings,
         }
     }
 }
@@ -159,17 +160,9 @@ impl<IT8951Interface: interface::IT8951Interface, TState> IT8951<IT8951Interface
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    pub fn new(interface: IT8951Interface, config: Config) -> Self {
-        Self::new_with_rotation(interface, config, Rotation::Rotate0)
-    }
-
-    /// Creates a new controller driver object
-    /// Call init afterwards to initalize the controller
-    /// Allows to set rotation
-    pub fn new_with_rotation(
+    pub fn new(
         mut interface: IT8951Interface,
         config: Config,
-        rotation: Rotation,
     ) -> Self {
         interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
@@ -177,10 +170,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             dev_info: None,
             marker: PhantomData {},
             config,
-            memory_converter_settings: MemoryConverterSetting{
-                rotation: rotation.into(),
-                ..MemoryConverterSetting::default()
-            },
+            
         }
     }
 
@@ -219,7 +209,6 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
             dev_info: None,
             marker: PhantomData {},
             config,
-            memory_converter_settings: MemoryConverterSetting::default(),
         }
         .sys_run()?;
 
@@ -518,13 +507,13 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     }
 
     fn rotate_area_info(&self, area: &AreaImgInfo) -> AreaImgInfo {
-        use memory_converter_settings::MemoryConverterRotation::*;
+        use Rotation::*;
         let info = self.dev_info.as_ref().expect("Unable to load device info");
         let (pw, ph) = (info.panel_width, info.panel_height);
 
         let (x, y, w, h) = (area.area_x, area.area_y, area.area_w, area.area_h);
 
-        let (x, y, w, h) = match self.memory_converter_settings.rotation {
+        let (x, y, w, h) = match self.config.rotation {
             Rotate0 => (x, y, w, h),
             Rotate90 => (y, ph - w - x, h, w),
             Rotate180 => (pw - w - x, ph - h - y, w, h),
@@ -592,7 +581,10 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         for (area_img_info, buffer) in area_iter {
             self.load_image_area(
                 memory_address,
-                self.memory_converter_settings,
+                MemoryConverterSetting {
+                    rotation: (&self.config.rotation).into(),
+                    ..Default::default()
+                },
                 &area_img_info,
                 buffer,
             )?;
@@ -617,7 +609,10 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         for (area_img_info, buffer) in pixel {
             self.load_image_area(
                 memory_address,
-                self.memory_converter_settings,
+                MemoryConverterSetting {
+                    rotation: (&self.config.rotation).into(),
+                    ..Default::default()
+                },
                 &area_img_info,
                 &buffer,
             )?;
@@ -654,7 +649,11 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
 
                 self.load_image_area(
                     memory_address,
-                    self.memory_converter_settings,
+                    MemoryConverterSetting {
+                        rotation: (&self.config.rotation).into(),
+                        ..Default::default()
+                    },
+    
                     &AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
@@ -675,11 +674,11 @@ impl<IT8951Interface: interface::IT8951Interface> OriginDimensions
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
         let (w, h) = (dev_info.panel_width as u32, dev_info.panel_height as u32);
-        let (w, h) = match self.memory_converter_settings.rotation {
-            memory_converter_settings::MemoryConverterRotation::Rotate0
-            | memory_converter_settings::MemoryConverterRotation::Rotate180 => (w, h),
-            memory_converter_settings::MemoryConverterRotation::Rotate90
-            | memory_converter_settings::MemoryConverterRotation::Rotate270 => (h, w),
+        let (w, h) = match self.config.rotation {
+            Rotation::Rotate0
+            | Rotation::Rotate180 => (w, h),
+            Rotation::Rotate90
+            | Rotation::Rotate270 => (h, w),
         };
         Size::new(w, h)
     }

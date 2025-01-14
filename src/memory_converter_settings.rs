@@ -72,8 +72,8 @@ impl MemoryConverterSetting {
     }
 }
 
-impl From<Rotation> for MemoryConverterRotation {
-    fn from(rotation: Rotation) -> Self {
+impl From<&Rotation> for MemoryConverterRotation {
+    fn from(rotation: &Rotation) -> Self {
         match rotation {
             Rotation::Rotate0 => MemoryConverterRotation::Rotate0,
             Rotation::Rotate90 => MemoryConverterRotation::Rotate90,
