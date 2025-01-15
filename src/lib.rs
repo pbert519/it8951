@@ -7,7 +7,7 @@
 
 #[macro_use]
 extern crate alloc;
-use core::marker::PhantomData;
+use core::{borrow::Borrow, marker::PhantomData};
 
 use alloc::string::String;
 
@@ -48,6 +48,8 @@ pub struct Config {
     /// The buffer must be aligned to u16
     /// The used IT8951 interface must support to write a complete buffer at once
     pub max_buffer_size: usize,
+    /// Display rotation
+    pub rotation: Rotation,
 }
 
 impl Default for Config {
@@ -56,6 +58,7 @@ impl Default for Config {
             timeout_display_engine: core::time::Duration::from_secs(15),
             timeout_interface: core::time::Duration::from_secs(15),
             max_buffer_size: 1024,
+            rotation: Rotation::Rotate0,
         }
     }
 }
@@ -111,6 +114,20 @@ pub enum WaveformMode {
     DU4 = 7,
 }
 
+/// Sets hardware rotation used by controller
+/// This will perform approriate rotation for all public interfaces exposed by the driver
+/// Including bounding boxes, pixel, and image drawing
+pub enum Rotation {
+    /// No rotation
+    Rotate0,
+    /// Rotate 90 degree
+    Rotate90,
+    /// Rotate 180 degree
+    Rotate180,
+    /// Rotate 270 degree
+    Rotate270,
+}
+
 /// Normal Operation
 pub struct Run;
 /// The device is either in sleep or standby mode:
@@ -127,6 +144,17 @@ pub struct IT8951<IT8951Interface, State> {
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
     config: Config,
+}
+
+impl<IT8951Interface: interface::IT8951Interface, TState> IT8951<IT8951Interface, TState> {
+    fn into_state<TNew>(self) -> IT8951<IT8951Interface, TNew> {
+        IT8951::<IT8951Interface, TNew> {
+            interface: self.interface,
+            dev_info: self.dev_info,
+            marker: PhantomData {},
+            config: self.config,
+        }
+    }
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
@@ -148,13 +176,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.reset()?;
 
-        let mut it8951 = IT8951::<IT8951Interface, PowerDown> {
-            interface: self.interface,
-            dev_info: self.dev_info,
-            marker: PhantomData {},
-            config: self.config,
-        }
-        .sys_run()?;
+        let mut it8951 = self.into_state::<PowerDown>().sys_run()?;
 
         let dev_info = it8951.get_system_info()?;
 
@@ -218,16 +240,17 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Warning: For the most usecases, the underlying spi transfer ist not capable to transfer a complete frame
     /// split the frame into multiple areas and use load_image_area instead
     /// Data must be aligned to u16!
-    pub fn load_image(
+    pub fn load_image<TMemoryConverterSetting: Borrow<MemoryConverterSetting>>(
         &mut self,
         target_mem_addr: u32,
-        image_settings: MemoryConverterSetting,
+        image_settings: TMemoryConverterSetting,
         data: &[u8],
     ) -> Result<(), Error> {
         self.set_target_memory_addr(target_mem_addr)?;
 
         self.interface.write_command(command::IT8951_TCON_LD_IMG)?;
-        self.interface.write_data(image_settings.into_arg())?;
+        self.interface
+            .write_data(image_settings.borrow().into_arg())?;
 
         self.interface.write_multi_data(data)?;
 
@@ -240,19 +263,20 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Memory Address should be read from the dev_info struct
     /// ImageSettings define the layout of the data buffer
     /// AreaInfo describes the frame buffer area which should be updated
-    pub fn load_image_area(
+    pub fn load_image_area<TMemoryConverterSetting: Borrow<MemoryConverterSetting>>(
         &mut self,
         target_mem_addr: u32,
-        image_settings: MemoryConverterSetting,
+        image_settings: TMemoryConverterSetting,
         area_info: &AreaImgInfo,
         data: &[u8],
     ) -> Result<(), Error> {
+        // Note that area_info does not need to be rotated here, as controller hw will do the rotation
         self.set_target_memory_addr(target_mem_addr)?;
 
         self.interface.write_command_with_args(
             command::IT8951_TCON_LD_IMG_AREA,
             &[
-                image_settings.into_arg(),
+                image_settings.borrow().into_arg(),
                 area_info.area_x,
                 area_info.area_y,
                 area_info.area_w,
@@ -324,13 +348,15 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
     /// Refresh a specific area of the display with the frame buffer content
     /// A usecase specific wafeform must be selected by the user
+    /// Note that this will panic if area_info is outside of screen bounding box when rotation is enabled
     pub fn display_area(
         &mut self,
         area_info: &AreaImgInfo,
         mode: WaveformMode,
     ) -> Result<(), Error> {
-        self.wait_for_display_ready()?;
+        let area_info = self.rotate_area_info(area_info);
 
+        self.wait_for_display_ready()?;
         let args = [
             area_info.area_x,
             area_info.area_y,
@@ -352,8 +378,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         mode: WaveformMode,
         target_mem_addr: u32,
     ) -> Result<(), Error> {
-        self.wait_for_display_ready()?;
-
+        let area_info = self.rotate_area_info(area_info);
         let args = [
             area_info.area_x,
             area_info.area_y,
@@ -364,6 +389,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             (target_mem_addr >> 16) as u16,
         ];
 
+        self.wait_for_display_ready()?;
         self.interface
             .write_command_with_args(command::USDEF_I80_CMD_DPY_BUF_AREA, &args)?;
         Ok(())
@@ -372,16 +398,14 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Refresh the full E-Ink display with the frame buffer content
     /// A usecase specific wafeform must be selected by the user
     pub fn display(&mut self, mode: WaveformMode) -> Result<(), Error> {
-        let dev_info = self.get_dev_info();
-        let width = dev_info.panel_width;
-        let height = dev_info.panel_height;
+        let size = self.size();
 
         self.display_area(
             &AreaImgInfo {
                 area_x: 0,
                 area_y: 0,
-                area_w: width,
-                area_h: height,
+                area_w: size.width as u16,
+                area_h: size.height as u16,
             },
             mode,
         )?;
@@ -407,24 +431,14 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// All clocks, pll, osc and the panel are off, but the ram is refreshed
     pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
-        Ok(IT8951 {
-            interface: self.interface,
-            dev_info: self.dev_info,
-            marker: PhantomData {},
-            config: self.config,
-        })
+        Ok(self.into_state())
     }
 
     /// Activate standby power mode
     /// Clocks are gated off, but pll, osc, panel power and ram is active
     pub fn standby(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
-        Ok(IT8951 {
-            interface: self.interface,
-            dev_info: self.dev_info,
-            marker: PhantomData {},
-            config: self.config,
-        })
+        Ok(self.into_state())
     }
 
     fn get_system_info(&mut self) -> Result<DevInfo, Error> {
@@ -487,6 +501,28 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface.write_data(data)?;
         Ok(())
     }
+
+    fn rotate_area_info(&self, area: &AreaImgInfo) -> AreaImgInfo {
+        use Rotation::*;
+        let info = self.dev_info.as_ref().expect("Unable to load device info");
+        let (pw, ph) = (info.panel_width, info.panel_height);
+
+        let (x, y, w, h) = (area.area_x, area.area_y, area.area_w, area.area_h);
+
+        let (x, y, w, h) = match self.config.rotation {
+            Rotate0 => (x, y, w, h),
+            Rotate90 => (y, ph - w - x, h, w),
+            Rotate180 => (pw - w - x, ph - h - y, w, h),
+            Rotate270 => (pw - h - y, x, h, w),
+        };
+
+        AreaImgInfo {
+            area_x: x,
+            area_y: y,
+            area_w: w,
+            area_h: h,
+        }
+    }
 }
 
 impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerDown> {
@@ -494,12 +530,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
     /// This is the normal operation power mode
     pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
-        Ok(IT8951 {
-            interface: self.interface,
-            dev_info: self.dev_info,
-            marker: PhantomData {},
-            config: self.config,
-        })
+        Ok(self.into_state())
     }
 }
 
@@ -513,14 +544,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     type Error = Error;
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let info = self.get_dev_info();
+        let size = self.size();
 
         self.fill_solid(
             &Rectangle::new(
                 Point::zero(),
                 Size {
-                    width: info.panel_width as u32,
-                    height: info.panel_height as u32,
+                    width: size.width,
+                    height: size.height,
                 },
             ),
             color,
@@ -537,12 +568,19 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
 
         let a = AreaSerializer::new(area, color, self.config.max_buffer_size);
         let area_iter = AreaSerializerIterator::new(&a);
+        let memory_address = self
+            .dev_info
+            .as_ref()
+            .map(|d| d.memory_address)
+            .expect("Dev info not initialized");
 
         for (area_img_info, buffer) in area_iter {
-            let dev_info = self.get_dev_info();
             self.load_image_area(
-                dev_info.memory_address,
-                MemoryConverterSetting::default(),
+                memory_address,
+                MemoryConverterSetting {
+                    rotation: (&self.config.rotation).into(),
+                    ..Default::default()
+                },
                 &area_img_info,
                 buffer,
             )?;
@@ -554,19 +592,23 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     where
         I: IntoIterator<Item = Self::Color>,
     {
-        let iter = convert_color_to_pixel_iterator(*area, self.bounding_box(), colors.into_iter());
+        let bb = self.bounding_box();
+        let iter = convert_color_to_pixel_iterator(area, &bb, colors.into_iter());
+        let memory_address = self
+            .dev_info
+            .as_ref()
+            .map(|d| d.memory_address)
+            .expect("Dev info not initialized");
 
-        let pixel = PixelSerializer::new(
-            area.intersection(&self.bounding_box()),
-            iter,
-            self.config.max_buffer_size,
-        );
+        let pixel = PixelSerializer::new(area.intersection(&bb), iter, self.config.max_buffer_size);
 
         for (area_img_info, buffer) in pixel {
-            let dev_info = self.get_dev_info();
             self.load_image_area(
-                dev_info.memory_address,
-                MemoryConverterSetting::default(),
+                memory_address,
+                MemoryConverterSetting {
+                    rotation: (&self.config.rotation).into(),
+                    ..Default::default()
+                },
                 &area_img_info,
                 &buffer,
             )?;
@@ -578,9 +620,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     where
         I: IntoIterator<Item = embedded_graphics_core::Pixel<Self::Color>>,
     {
-        let dev_info = self.get_dev_info();
-        let width = dev_info.panel_width as i32;
-        let height = dev_info.panel_height as i32;
+        let memory_address = self
+            .dev_info
+            .as_ref()
+            .map(|d| d.memory_address)
+            .expect("Dev info not initialized");
+        let size = self.size();
+        let width = size.width as i32;
+        let height = size.height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
                 let mut data = [0x00, 0x00];
@@ -597,8 +644,11 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                 }
 
                 self.load_image_area(
-                    dev_info.memory_address,
-                    MemoryConverterSetting::default(),
+                    memory_address,
+                    MemoryConverterSetting {
+                        rotation: (&self.config.rotation).into(),
+                        ..Default::default()
+                    },
                     &AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
@@ -618,6 +668,11 @@ impl<IT8951Interface: interface::IT8951Interface> OriginDimensions
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
-        Size::new(dev_info.panel_width as u32, dev_info.panel_height as u32)
+        let (w, h) = (dev_info.panel_width as u32, dev_info.panel_height as u32);
+        let (w, h) = match self.config.rotation {
+            Rotation::Rotate0 | Rotation::Rotate180 => (w, h),
+            Rotation::Rotate90 | Rotation::Rotate270 => (h, w),
+        };
+        Size::new(w, h)
     }
 }

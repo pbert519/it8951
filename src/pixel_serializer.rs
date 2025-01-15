@@ -1,4 +1,4 @@
-use core::ops::BitXor;
+use core::{borrow::Borrow, ops::BitXor};
 
 use crate::{serialization_helper::get_entires_per_row, AreaImgInfo};
 use alloc::vec::Vec;
@@ -84,14 +84,15 @@ impl<I: Iterator<Item = Pixel<Gray4>>> Iterator for PixelSerializer<I> {
 
 /// combines the color for each pixel with its position
 /// the iterator filters all pixels, which are not drawable
-pub fn convert_color_to_pixel_iterator<In: Iterator<Item = Gray4>>(
-    area: Rectangle,
-    bounding_box: Rectangle,
+pub fn convert_color_to_pixel_iterator<In: Iterator<Item = Gray4>, TRect: Borrow<Rectangle>>(
+    area: TRect,
+    bounding_box: TRect,
     colors: In,
 ) -> impl Iterator<Item = Pixel<Gray4>> {
-    let drawable_area = area.intersection(&bounding_box);
+    let drawable_area = area.borrow().intersection(bounding_box.borrow());
 
-    area.points()
+    area.borrow()
+        .points()
         .zip(colors)
         .filter(move |(pos, _color)| drawable_area.contains(*pos))
         .map(|(pos, color)| Pixel(pos, color))
