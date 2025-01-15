@@ -23,6 +23,10 @@ This driver can be used with the embedded graphics trait, currently only suppori
 
 ## Changelog
 
+### 0.4.2
+- add display rotation support
+- Exponential backoff for `wait_while_busy`
+
 ### 0.4.1
 - fix divide by zero in fill_solid for zero sized area
 - fill_solid correctly skip limit areas to the display bounds
