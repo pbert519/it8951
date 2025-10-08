@@ -17,7 +17,10 @@ impl AreaSerializer {
         let raw_color = color.luma();
         let data_entry = raw_color << 4 | raw_color;
 
-        assert!(buffer_size % 2 == 0, "Buffer size must be aligned to u16");
+        assert!(
+            buffer_size.is_multiple_of(2),
+            "Buffer size must be aligned to u16"
+        );
         // calculate the buffer size
         let entries_per_row = get_entires_per_row(area) as usize * 2; // convert length from u16 to u8
         let rows_per_step = (buffer_size / entries_per_row).min(area.size.height as usize);
