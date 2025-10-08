@@ -6,6 +6,9 @@ use embedded_hal::{
     spi::{Operation, SpiDevice},
 };
 
+#[cfg(feature = "defmt")]
+use defmt;
+
 /// Interface Error
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -126,6 +129,9 @@ where
 
         while self.busy.is_low().map_err(|_| Error::GPIOError)? {
             if accumulated_delay_us > timeout_us {
+                #[cfg(feature = "defmt")]
+                defmt::warn!("Timeout while waiting, waited {}μs", timeout_us);
+
                 return Err(Error::BusyTimeout);
             }
             self.delay.delay_us(delay_us);
@@ -147,6 +153,9 @@ where
         let buf = [0x00, 0x00, (data >> 8) as u8, data as u8];
 
         if self.spi.write(&buf).is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("SPI Error while writing");
+
             return Err(Error::SpiError);
         }
 
@@ -157,6 +166,9 @@ where
         self.wait_while_busy()?;
 
         if !data.len().is_multiple_of(2) {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("Buffer alignment error");
+
             return Err(Error::BufferAlignment);
         };
 
@@ -165,6 +177,9 @@ where
             .transaction(&mut [Operation::Write(&[0x00, 0x00]), Operation::Write(data)])
             .is_err()
         {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("SPI Error while writing");
+
             return Err(Error::SpiError);
         }
 
@@ -180,6 +195,9 @@ where
         let buf = [0x60, 0x00, (cmd >> 8) as u8, cmd as u8];
 
         if self.spi.write(&buf).is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("SPI Error while writing");
+
             return Err(Error::SpiError);
         }
         Ok(())
@@ -192,6 +210,9 @@ where
         // 0x1000 -> Prefix for Read Data
         let mut buf = [0x10, 0x00, 0x00, 0x00, 0x00, 0x00];
         if self.spi.transfer_in_place(&mut buf).is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("SPI Error while reading");
+
             return Err(Error::SpiError);
         }
         // we skip the first 2 bytes -> shifted out while transfer the prefix
@@ -210,6 +231,9 @@ where
         read_buf[1] = 0x00;
 
         if self.spi.transfer_in_place(&mut read_buf).is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("SPI Error while writing");
+
             return Err(Error::SpiError);
         }
 
@@ -228,14 +252,23 @@ where
 
     fn reset(&mut self) -> Result<(), Error> {
         if self.rst.set_high().is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("IO Error while resetting");
+
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(200);
         if self.rst.set_low().is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("IO Error while resetting");
+
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(20);
         if self.rst.set_high().is_err() {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("IO Error while resetting");
+
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(200);

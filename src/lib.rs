@@ -23,6 +23,9 @@ use area_serializer::{AreaSerializer, AreaSerializerIterator};
 use memory_converter_settings::MemoryConverterSetting;
 use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
+#[cfg(feature = "defmt")]
+use defmt;
+
 /// Controller Error
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -94,7 +97,24 @@ pub struct AreaImgInfo {
     pub area_h: u16,
 }
 
+#[cfg(feature = "defmt")]
+impl defmt::Format for AreaImgInfo {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(
+            fmt,
+            "Area Img Info {}x{} @ {}x{}",
+            self.area_w,
+            self.area_h,
+            self.area_x,
+            self.area_y
+        );
+    }
+}
+
 /// See https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf for full description
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[repr(u16)]
 pub enum WaveformMode {
     /// used for full erase to white, flashy, should be used if framebuffer is not up to date
     Init = 0,
@@ -183,9 +203,22 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
         // Enable Pack Write
         it8951.write_register(register::I80CPCR, 0x0001)?;
 
-        if vcom != it8951.get_vcom()? {
+        let current_vcom = it8951.get_vcom()?;
+        if vcom != current_vcom {
+            #[cfg(feature = "defmt")]
+            defmt::trace!("Overriding vcom, wanted {}, current {}", vcom, current_vcom);
+
             it8951.set_vcom(vcom)?;
         }
+
+        #[cfg(feature = "defmt")]
+        defmt::info!(
+            "Initialized screen Resoultion {}x{}, LUT {}, FWV {}",
+            dev_info.panel_width,
+            dev_info.panel_height,
+            dev_info.lut_version,
+            dev_info.firmware_version,
+        );
 
         it8951.dev_info = Some(dev_info);
 
@@ -210,6 +243,18 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         it8951.dev_info = Some(it8951.get_system_info()?);
 
+        #[cfg(feature = "defmt")]
+        {
+            let dev_info = it8951.dev_info.as_ref().unwrap();
+            defmt::info!(
+                "Attached screen Resoultion {}x{}, LUT {}, FWV {}",
+                dev_info.panel_width,
+                dev_info.panel_height,
+                dev_info.lut_version,
+                dev_info.firmware_version,
+            );
+        }
+
         Ok(it8951)
     }
 }
@@ -224,6 +269,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Use only if the image is not clear!
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
         self.write_register(0x0038, 0x0602)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::warn!("Increased driver strength!");
+
         Ok(())
     }
 
@@ -231,6 +280,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     pub fn reset(&mut self) -> Result<(), Error> {
         self.clear(Gray4::WHITE)?;
         self.display(WaveformMode::Init)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Cleared display");
+
         Ok(())
     }
 
@@ -256,6 +309,9 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
         self.interface
             .write_command(command::IT8951_TCON_LD_IMG_END)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Loaded full image");
         Ok(())
     }
 
@@ -289,12 +345,19 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface
             .write_command(command::IT8951_TCON_LD_IMG_END)?;
 
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Loaded image area {}", area_info);
+
         Ok(())
     }
 
     fn set_target_memory_addr(&mut self, target_mem_addr: u32) -> Result<(), Error> {
         self.write_register(register::LISAR + 2, (target_mem_addr >> 16) as u16)?;
         self.write_register(register::LISAR, target_mem_addr as u16)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Target memory addr set {:x}", target_mem_addr);
+
         Ok(())
     }
 
@@ -322,6 +385,13 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface
             .write_command(command::IT8951_TCON_MEM_BST_END)?;
 
+        #[cfg(feature = "defmt")]
+        defmt::trace!(
+            "Read {} bytes of data from {:x}",
+            data.len() * 2,
+            memory_address
+        );
+
         Ok(())
     }
 
@@ -341,6 +411,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
         self.interface
             .write_command(command::IT8951_TCON_MEM_BST_END)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Wrote {} bytes of data to {:x}", data.len(), memory_address);
+
         Ok(())
     }
 
@@ -367,6 +441,14 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
         self.interface
             .write_command_with_args(command::USDEF_I80_CMD_DPY_AREA, &args)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!(
+            "Refreshed display area {} with mode {}",
+            area_info,
+            mode.clone()
+        );
+
         Ok(())
     }
 
@@ -392,6 +474,15 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.wait_for_display_ready()?;
         self.interface
             .write_command_with_args(command::USDEF_I80_CMD_DPY_BUF_AREA, &args)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!(
+            "Refreshed display area {} with mode {} from addr {}",
+            area_info,
+            mode,
+            target_mem_addr
+        );
+
         Ok(())
     }
 
@@ -431,6 +522,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// All clocks, pll, osc and the panel are off, but the ram is refreshed
     pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Sleep mode");
+
         Ok(self.into_state())
     }
 
@@ -438,6 +533,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     /// Clocks are gated off, but pll, osc, panel power and ram is active
     pub fn standby(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Standby mode");
+
         Ok(self.into_state())
     }
 
@@ -478,6 +577,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0000)?;
         let vcom = self.interface.read_data()?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("CURRENT VCOM = {}", vcom);
+
         Ok(vcom)
     }
 
@@ -485,6 +588,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0001)?;
         self.interface.write_data(vcom)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("VCOM Set {}", vcom);
+
         Ok(())
     }
 
@@ -530,6 +637,10 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
     /// This is the normal operation power mode
     pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, Run>, Error> {
         self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Sys run");
+
         Ok(self.into_state())
     }
 }
@@ -585,6 +696,10 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                 buffer,
             )?;
         }
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Embedded graphics: Fill solid");
+
         Ok(())
     }
 
@@ -613,6 +728,10 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                 &buffer,
             )?;
         }
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Embedded graphics: Fill contingenous");
+
         Ok(())
     }
 
@@ -659,6 +778,10 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                 )?;
             }
         }
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Embedded graphics: Draw iter");
+
         Ok(())
     }
 }

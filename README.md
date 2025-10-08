@@ -23,6 +23,9 @@ This driver can be used with the embedded graphics trait, currently only suppori
 
 ## Changelog
 
+### Unreleased
+- Add optional defmt support
+
 ### 0.4.2
 - add display rotation support
 - Exponential backoff for `wait_while_busy`
