@@ -156,7 +156,7 @@ where
     fn write_multi_data(&mut self, data: &[u8]) -> Result<(), Error> {
         self.wait_while_busy()?;
 
-        if data.len() % 2 > 0 {
+        if !data.len().is_multiple_of(2) {
             return Err(Error::BufferAlignment);
         };
 
