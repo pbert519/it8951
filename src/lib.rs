@@ -7,6 +7,7 @@
 
 #[macro_use]
 extern crate alloc;
+
 use alloc::string::String;
 use core::{borrow::Borrow, marker::PhantomData};
 
@@ -14,6 +15,7 @@ mod area_serializer;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
+pub mod origin;
 mod pixel_serializer;
 mod register;
 mod serialization_helper;
@@ -158,33 +160,55 @@ pub struct Off;
 
 /// IT8951 e paper driver
 /// The controller supports multiple interfaces
-pub struct IT8951<IT8951Interface, State> {
+pub struct IT8951<IT8951Interface, TOrigin: Origin, State> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
+    origin: core::marker::PhantomData<TOrigin>,
     config: Config,
 }
 
-impl<IT8951Interface: interface::IT8951Interface, TState> IT8951<IT8951Interface, TState> {
-    fn into_state<TNew>(self) -> IT8951<IT8951Interface, TNew> {
-        IT8951::<IT8951Interface, TNew> {
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, TState>
+    IT8951<IT8951Interface, TOrigin, TState>
+{
+    fn into_state<TNew>(self) -> IT8951<IT8951Interface, TOrigin, TNew> {
+        IT8951::<IT8951Interface, TOrigin, TNew> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
+            origin: PhantomData {},
             config: self.config,
         }
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
+impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, OriginTopLeft, Off> {
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
-    pub fn new(mut interface: IT8951Interface, config: Config) -> Self {
+    pub fn new(
+        interface: IT8951Interface,
+        config: Config,
+    ) -> IT8951<IT8951Interface, OriginTopLeft, Off> {
+        Self::new_with_origin(interface, config, OriginTopLeft {})
+    }
+}
+
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
+    IT8951<IT8951Interface, TOrigin, Off>
+{
+    /// Creates a new controller driver object with a customized origin type
+    /// Call init afterwards to initalize the controller
+    pub fn new_with_origin(
+        mut interface: IT8951Interface,
+        config: Config,
+        _: TOrigin,
+    ) -> IT8951<IT8951Interface, TOrigin, Off> {
         interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            origin: PhantomData {},
             config,
         }
     }
@@ -192,7 +216,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
     /// Since version 0.4.0, this function no longer resets the display
-    pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, Run>, Error> {
+    pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
         self.interface.reset()?;
 
         let mut it8951 = self.into_state::<PowerDown>().sys_run()?;
@@ -230,13 +254,14 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     pub fn attach(
         mut interface: IT8951Interface,
         config: Config,
-    ) -> Result<IT8951<IT8951Interface, Run>, Error> {
+    ) -> Result<IT8951<IT8951Interface, OriginTopLeft, Run>, Error> {
         interface.set_busy_timeout(config.timeout_interface);
 
-        let mut it8951 = IT8951 {
+        let mut it8951: IT8951<IT8951Interface, OriginTopLeft, Run> = IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
+            origin: PhantomData {},
             config,
         }
         .sys_run()?;
@@ -259,7 +284,9 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
+    IT8951<IT8951Interface, TOrigin, Run>
+{
     /// Get the Device information
     pub fn get_dev_info(&self) -> DevInfo {
         self.dev_info.clone().unwrap()
@@ -323,12 +350,13 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         &mut self,
         target_mem_addr: u32,
         image_settings: TMemoryConverterSetting,
-        area_info: &AreaImgInfo,
+        area_info: &mut AreaImgInfo,
         data: &[u8],
     ) -> Result<(), Error> {
         // Note that area_info does not need to be rotated here, as controller hw will do the rotation
         self.set_target_memory_addr(target_mem_addr)?;
 
+        TOrigin::transform(area_info, self.dev_info.as_ref().unwrap());
         self.interface.write_command_with_args(
             command::IT8951_TCON_LD_IMG_AREA,
             &[
@@ -525,7 +553,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
     /// Activate sleep power mode
     /// All clocks, pll, osc and the panel are off, but the ram is refreshed
-    pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
+    pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, TOrigin, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
 
         #[cfg(feature = "defmt")]
@@ -536,7 +564,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
 
     /// Activate standby power mode
     /// Clocks are gated off, but pll, osc, panel power and ram is active
-    pub fn standby(mut self) -> Result<IT8951<IT8951Interface, PowerDown>, Error> {
+    pub fn standby(mut self) -> Result<IT8951<IT8951Interface, TOrigin, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
 
         #[cfg(feature = "defmt")]
@@ -644,10 +672,12 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerDown> {
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
+    IT8951<IT8951Interface, TOrigin, PowerDown>
+{
     /// Activate active power mode
     /// This is the normal operation power mode
-    pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, Run>, Error> {
+    pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
         self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
 
         #[cfg(feature = "defmt")]
@@ -661,7 +691,11 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, PowerD
 
 use embedded_graphics_core::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
-impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951Interface, Run> {
+use crate::origin::{Origin, OriginTopLeft};
+
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
+    for IT8951<IT8951Interface, TOrigin, Run>
+{
     type Color = Gray4;
 
     type Error = Error;
@@ -697,14 +731,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        for (area_img_info, buffer) in area_iter {
+        for (mut area_img_info, buffer) in area_iter {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &area_img_info,
+                &mut area_img_info,
                 buffer,
             )?;
         }
@@ -727,16 +761,21 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        let pixel = PixelSerializer::new(area.intersection(&bb), iter, self.config.max_buffer_size);
+        let pixel = PixelSerializer::<_, TOrigin>::new(
+            area.intersection(&bb),
+            iter,
+            self.config.max_buffer_size,
+        );
 
-        for (area_img_info, buffer) in pixel {
+        for (mut area_img_info, buffer) in pixel {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
+                    endianness: memory_converter_settings::MemoryConverterEndianness::LittleEndian,
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &area_img_info,
+                &mut area_img_info,
                 &buffer,
             )?;
         }
@@ -770,7 +809,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                         rotation: (&self.config.rotation).into(),
                         ..Default::default()
                     },
-                    &AreaImgInfo {
+                    &mut AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
                         area_w: 1,
@@ -788,8 +827,8 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface> OriginDimensions
-    for IT8951<IT8951Interface, Run>
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> OriginDimensions
+    for IT8951<IT8951Interface, TOrigin, Run>
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
