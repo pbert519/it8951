@@ -25,6 +25,7 @@ This driver can be used with the embedded graphics trait, currently only suppori
 
 ### Unreleased
 - Add optional defmt support
+- Add display origin support (fixes mirroring on certain devices)
 
 ### 0.4.2
 - add display rotation support

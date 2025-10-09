@@ -53,6 +53,8 @@ pub struct Config {
     pub max_buffer_size: usize,
     /// Display rotation
     pub rotation: Rotation,
+    /// The Zero point origin of the display
+    pub origin: Origin,
 }
 
 impl Default for Config {
@@ -62,6 +64,7 @@ impl Default for Config {
             timeout_interface: core::time::Duration::from_secs(15),
             max_buffer_size: 1024,
             rotation: Rotation::Rotate0,
+            origin: Origin::TopLeft,
         }
     }
 }
@@ -146,6 +149,19 @@ pub enum Rotation {
     Rotate180,
     /// Rotate 270 degree
     Rotate270,
+}
+
+/// Sets origin of the controller
+/// This will transform any image area operations before send to the controller
+pub enum Origin {
+    /// Origin is in TopLeft corner (Default)
+    TopLeft,
+    /// Origin is in the TopRight corner
+    TopRight,
+    /// Origin is in the BottomLeft corner
+    BottomLeft,
+    /// Origin is in the BottomRight corner
+    BottomRight,
 }
 
 /// Normal Operation
@@ -323,12 +339,13 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         &mut self,
         target_mem_addr: u32,
         image_settings: TMemoryConverterSetting,
-        area_info: &AreaImgInfo,
+        area_info: &mut AreaImgInfo,
         data: &[u8],
     ) -> Result<(), Error> {
         // Note that area_info does not need to be rotated here, as controller hw will do the rotation
         self.set_target_memory_addr(target_mem_addr)?;
 
+        self.transform_area_info(area_info);
         self.interface.write_command_with_args(
             command::IT8951_TCON_LD_IMG_AREA,
             &[
@@ -504,6 +521,30 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     }
 
     // misc  ------------------------------------------------------------------------------------------------
+
+    fn transform_area_info(&self, area_img_info: &mut AreaImgInfo) {
+        match self.config.origin {
+            Origin::TopLeft => {}
+            Origin::TopRight => {
+                area_img_info.area_x = self.dev_info.as_ref().unwrap().panel_width
+                    - area_img_info.area_x
+                    - area_img_info.area_w;
+            }
+            Origin::BottomLeft => {
+                area_img_info.area_y = self.dev_info.as_ref().unwrap().panel_height
+                    - area_img_info.area_y
+                    - area_img_info.area_h;
+            }
+            Origin::BottomRight => {
+                area_img_info.area_x = self.dev_info.as_ref().unwrap().panel_width
+                    - area_img_info.area_x
+                    - area_img_info.area_w;
+                area_img_info.area_y = self.dev_info.as_ref().unwrap().panel_height
+                    - area_img_info.area_y
+                    - area_img_info.area_h;
+            }
+        }
+    }
 
     fn wait_for_display_ready(&mut self) -> Result<(), Error> {
         let timeout = self.config.timeout_display_engine.as_micros() as u64;
@@ -685,14 +726,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        for (area_img_info, buffer) in area_iter {
+        for (mut area_img_info, buffer) in area_iter {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &area_img_info,
+                &mut area_img_info,
                 buffer,
             )?;
         }
@@ -717,14 +758,14 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
 
         let pixel = PixelSerializer::new(area.intersection(&bb), iter, self.config.max_buffer_size);
 
-        for (area_img_info, buffer) in pixel {
+        for (mut area_img_info, buffer) in pixel {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &area_img_info,
+                &mut area_img_info,
                 &buffer,
             )?;
         }
@@ -768,7 +809,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
                         rotation: (&self.config.rotation).into(),
                         ..Default::default()
                     },
-                    &AreaImgInfo {
+                    &mut AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
                         area_w: 1,
