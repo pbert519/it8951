@@ -8,8 +8,8 @@
 #[macro_use]
 extern crate alloc;
 
-use alloc::string::String;
 use core::{borrow::Borrow, marker::PhantomData};
+use heapless::String;
 
 mod area_serializer;
 mod command;
@@ -78,11 +78,11 @@ pub struct DevInfo {
     /// start address of the frame buffer in the controller ram
     pub memory_address: u32,
     /// Controller firmware version
-    pub firmware_version: String,
+    pub firmware_version: String<16>,
     /// LUT version
     /// The lut describes the waveforms to modify the display content
     /// LUT is specific for every display
-    pub lut_version: String,
+    pub lut_version: String<16>,
 }
 
 /// Describes a area on the display
@@ -604,7 +604,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         }
     }
 
-    fn buf_to_str(buffer: &[u8]) -> String {
+    fn buf_to_str<const N: usize>(buffer: &[u8]) -> String<N> {
         String::from_iter(
             buffer
                 .iter()
