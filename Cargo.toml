@@ -14,6 +14,11 @@ readme = "README.md"
 [dependencies]
 embedded-hal = {version = "1"}
 embedded-graphics-core = "0.4.0"
+defmt = { version = "^1.0.1", optional = true }
+
+[features]
+# Adds defmt support
+defmt = ["dep:defmt", "embedded-graphics-core/defmt"]
 
 [dev-dependencies]
 linux-embedded-hal = "0.4"
