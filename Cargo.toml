@@ -15,10 +15,11 @@ readme = "README.md"
 embedded-hal = {version = "1"}
 embedded-graphics-core = "0.4.0"
 defmt = { version = "^1.0.1", optional = true }
+heapless = "0.9.1"
 
 [features]
 # Adds defmt support
-defmt = ["dep:defmt", "embedded-graphics-core/defmt"]
+defmt = ["dep:defmt", "embedded-graphics-core/defmt", "heapless/defmt"]
 
 [dev-dependencies]
 linux-embedded-hal = "0.4"
