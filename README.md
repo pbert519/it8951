@@ -11,9 +11,27 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - **Important** Data must be always aligned to 16bit words!
 - The crates uses the alloc feature to allocate memory on the heap:
     - Firmware and LUT version string read from the controller
-    - Staging buffers to write pixel to the controller. The buffers are allocated as needed, but only one buffer at a time and with up to 1kByte of size.
+    - Staging buffers to write pixel to the controller. The buffers are allocated as needed, but only one buffer at a time and with up to `Config::max_buffer_size`, which is 1kByte per default.
     - When reading controller memory a staging buffer with the size of of the requested data is created.
 
+## Performance Considerations
+Always prefer the embedded_graphics `fill_solid` and `fill_contiguous` functions over `draw_iter`.
+`draw_iter` writes every single pixel to the display, which has a significant overhead.
+
+### Improve Drawing Speed e.g. for Fonts
+If you embedded_graphics UI uses a lot of `draw_iter` calls, e.g. for font rendering, please consider using the textbox locally.
+A suitable crate is [embedded-graphics-framebuf](https://crates.io/crates/embedded-graphics-framebuf). 
+An example can be found in the `test_eink` example.
+The idea is to create a local framebuffer to render into, with only the required dimensions e.g. 100x20px on an 1000x800px display.
+The local framebuffer can be written sparsely using `draw_iter`. 
+Afterwards the full local framebuffer is written to the display using `fill_contiguous`.
+On an 200x30px sized Text as used in the example the speed-up is roughly 10x.
+
+### Allocation details
+The general approach of this crate is to dynamically allocate buffers with the smallest possible size.
+Meaning the required heap is minimized, but new allocations & releases may happen more often.
+
+We are currently discussing approaches without alloc. If you have any opinion on this please get in touch. 
 
 ## TODOs
 - Support Gray2 and Gray8 with embedded-graphics

@@ -69,6 +69,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     .draw(&mut epd)
     .unwrap();
 
+    // Draw centered text using a local framebuffer
+    let mut data = [Gray4::BLACK; 250 * 30];
+    let mut fbuf = embedded_graphics_framebuf::FrameBuf::new_with_origin(
+        &mut data,
+        250,
+        30,
+        Point { x: 1200, y: 500 },
+    );
+    embedded_graphics::text::Text::with_alignment(
+        text,
+        fbuf.bounding_box().center(),
+        embedded_graphics::mono_font::MonoTextStyle::new(
+            &embedded_graphics::mono_font::iso_8859_1::FONT_9X18_BOLD,
+            Gray4::WHITE,
+        ),
+        embedded_graphics::text::Alignment::Center,
+    )
+    .draw(&mut fbuf)
+    .unwrap();
+    epd.fill_contiguous(&Rectangle::new(fbuf.origin(), fbuf.size()), data)
+        .unwrap();
+
     epd.display(it8951::WaveformMode::GL16).unwrap();
 
     epd.sleep().unwrap();
