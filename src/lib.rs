@@ -749,18 +749,8 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         let height = size.height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
             if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
-                let mut data = [0x00, 0x00];
-
-                let value: u8 = color.luma() << ((coord.x % 2) * 4);
-                // little endian layout
-                // [P3, P2 | P1, P0]
-                if coord.x % 4 > 1 {
-                    // pixel 2 and 3
-                    data[0] = value;
-                } else {
-                    // pixel 0 and 1
-                    data[1] = value;
-                }
+                let raw_color = color.luma();
+                let data = [raw_color << 4 | raw_color, raw_color << 4 | raw_color];
 
                 self.load_image_area(
                     memory_address,
