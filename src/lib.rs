@@ -730,7 +730,7 @@ impl<IT8951Interface: interface::IT8951Interface> DrawTarget for IT8951<IT8951In
         }
 
         #[cfg(feature = "defmt")]
-        defmt::trace!("Embedded graphics: Fill contingenous");
+        defmt::trace!("Embedded graphics: Fill contiguous");
 
         Ok(())
     }
