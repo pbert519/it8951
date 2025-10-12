@@ -213,7 +213,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         #[cfg(feature = "defmt")]
         defmt::info!(
-            "Initialized screen Resoultion {}x{}, LUT {}, FWV {}",
+            "Initialized screen Resolution {}x{}, LUT {=str}, FWV {=str}",
             dev_info.panel_width,
             dev_info.panel_height,
             dev_info.lut_version,
@@ -247,7 +247,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
         {
             let dev_info = it8951.dev_info.as_ref().unwrap();
             defmt::info!(
-                "Attached screen Resoultion {}x{}, LUT {}, FWV {}",
+                "Attached screen Resolution {}x{}, LUT {=str}, FWV {=str}",
                 dev_info.panel_width,
                 dev_info.panel_height,
                 dev_info.lut_version,
