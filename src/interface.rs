@@ -55,7 +55,8 @@ pub trait IT8951Interface {
     fn read_data(&mut self) -> Result<u16, Error>;
 
     /// read multiple 16bit values
-    fn read_multi_data(&mut self, buf: &mut [u16]) -> Result<(), Error>;
+    /// Data must be aligned to u16!
+    fn read_multi_data(&mut self, buf: &mut [u8]) -> Result<(), Error>;
 
     /// reset the controller
     fn reset(&mut self) -> Result<(), Error>;
@@ -221,30 +222,27 @@ where
         Ok(u16::from_be_bytes([buf[4], buf[5]]))
     }
 
-    fn read_multi_data(&mut self, buf: &mut [u16]) -> Result<(), Error> {
+    fn read_multi_data(&mut self, buf: &mut [u8]) -> Result<(), Error> {
         self.wait_while_busy()?;
-        // create a u8 buffer
-        let mut read_buf = vec![0u8; buf.len()*2 /* nbr of data bytes */ + 2 /*dummby bytes */ + 2 /* read preamble */];
+
+        if !buf.len().is_multiple_of(2) {
+            #[cfg(feature = "defmt")]
+            defmt::warn!("Buffer alignment error");
+
+            return Err(Error::BufferAlignment);
+        };
 
         // 0x1000 prefix for read data
-        read_buf[0] = 0x10;
-        read_buf[1] = 0x00;
-
-        if self.spi.transfer_in_place(&mut read_buf).is_err() {
+        let cmd = [0x10_u8, 0x00, 0x00, 0x00];
+        if self
+            .spi
+            .transaction(&mut [Operation::Write(&cmd), Operation::TransferInPlace(buf)])
+            .is_err()
+        {
             #[cfg(feature = "defmt")]
-            defmt::warn!("SPI Error while writing");
+            defmt::warn!("SPI Error while reading");
 
             return Err(Error::SpiError);
-        }
-
-        // we skip the first 2 bytes -> shifted out while transfer the prefix
-        // the next two bytes are only dummies and are skipped to
-        const OFFSET: usize = 4;
-        for index in 0..buf.len() {
-            buf[index] = u16::from_be_bytes([
-                read_buf[OFFSET + index * 2],
-                read_buf[OFFSET + index * 2 + 1],
-            ]);
         }
 
         Ok(())

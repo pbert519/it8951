@@ -7,9 +7,8 @@
 
 #[macro_use]
 extern crate alloc;
-use core::{borrow::Borrow, marker::PhantomData};
-
 use alloc::string::String;
+use core::{borrow::Borrow, marker::PhantomData};
 
 mod area_serializer;
 mod command;
@@ -213,11 +212,12 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Off> {
 
         #[cfg(feature = "defmt")]
         defmt::info!(
-            "Initialized screen Resolution {}x{}, LUT {=str}, FWV {=str}",
+            "Initialized screen Resolution {}x{}, LUT {=str}, FWV {=str} MA = {:x}",
             dev_info.panel_width,
             dev_info.panel_height,
             dev_info.lut_version,
             dev_info.firmware_version,
+            dev_info.memory_address,
         );
 
         it8951.dev_info = Some(dev_info);
@@ -364,11 +364,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
     // buffer functions -------------------------------------------------------------------------------------------------
 
     /// Reads the given memory address from the controller ram into data
-    pub fn memory_burst_read(
-        &mut self,
-        memory_address: u32,
-        data: &mut [u16],
-    ) -> Result<(), Error> {
+    /// Buffer needs to be aligned to u16!
+    pub fn memory_burst_read(&mut self, memory_address: u32, data: &mut [u8]) -> Result<(), Error> {
         let args = [
             memory_address as u16,
             (memory_address >> 16) as u16,
@@ -388,16 +385,22 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         #[cfg(feature = "defmt")]
         defmt::trace!(
             "Read {} bytes of data from {:x}",
-            data.len() * 2,
+            data.len(),
             memory_address
         );
+
+        Self::convert_endianness(data);
 
         Ok(())
     }
 
     /// Writes a buffer of u16 values to the given memory address in the controller ram
     /// Buffer needs to be aligned to u16!
-    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u8]) -> Result<(), Error> {
+    pub fn memory_burst_write(
+        &mut self,
+        memory_address: u32,
+        data: &mut [u8],
+    ) -> Result<(), Error> {
         let args = [
             memory_address as u16,
             (memory_address >> 16) as u16,
@@ -406,6 +409,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         ];
         self.interface
             .write_command_with_args(command::IT8951_TCON_MEM_BST_WR, &args)?;
+
+        Self::convert_endianness(data);
 
         self.interface.write_multi_data(data)?;
 
@@ -547,30 +552,37 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         self.interface.wait_while_busy()?;
 
         // 40 bytes payload
-        let mut buf = [0x0000; 20];
+        let mut buf = [0x0000; 40];
         self.interface.read_multi_data(&mut buf)?;
 
+        Self::convert_endianness(&mut buf);
+
         Ok(DevInfo {
-            panel_width: buf[0],
-            panel_height: buf[1],
-            memory_address: ((buf[3] as u32) << 16) | (buf[2] as u32),
-            firmware_version: self.buf_to_string(&buf[4..12]),
-            lut_version: self.buf_to_string(&buf[12..20]),
+            panel_width: u16::from_be_bytes([buf[1], buf[0]]),
+            panel_height: u16::from_be_bytes([buf[3], buf[2]]),
+            memory_address: u32::from_be_bytes([buf[7], buf[6], buf[5], buf[4]]),
+            firmware_version: Self::buf_to_str(&buf[8..24]),
+            lut_version: Self::buf_to_str(&buf[25..40]),
         })
     }
 
-    fn buf_to_string(&self, buf: &[u16]) -> String {
-        buf.iter()
-            .filter(|&&raw| raw != 0x0000)
-            .fold(String::new(), |mut res, &raw| {
-                if let Some(c) = char::from_u32((raw & 0xFF) as u32) {
-                    res.push(c);
-                }
-                if let Some(c) = char::from_u32((raw >> 8) as u32) {
-                    res.push(c);
-                }
-                res
-            })
+    fn convert_endianness(buffer: &mut [u8]) {
+        if !buffer.len().is_multiple_of(2) {
+            panic!("Buffer needs to be align on u16");
+        }
+
+        for i in (0..buffer.len() - 1).step_by(2) {
+            buffer.swap(i, i + 1)
+        }
+    }
+
+    fn buf_to_str(buffer: &[u8]) -> String {
+        String::from_iter(
+            buffer
+                .iter()
+                .filter(|&&raw| raw != 0x0000)
+                .map(|c| char::from(*c)),
+        )
     }
 
     fn get_vcom(&mut self) -> Result<u16, Error> {

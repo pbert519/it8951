@@ -12,7 +12,6 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - The crates uses the alloc feature to allocate memory on the heap:
     - Firmware and LUT version string read from the controller
     - Staging buffers to write pixel to the controller. The buffers are allocated as needed, but only one buffer at a time and with up to `Config::max_buffer_size`, which is 1kByte per default.
-    - When reading controller memory a staging buffer with the size of of the requested data is created.
 
 ## Performance Considerations
 Always prefer the embedded_graphics `fill_solid` and `fill_contiguous` functions over `draw_iter`.
