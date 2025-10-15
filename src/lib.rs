@@ -389,12 +389,18 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             memory_address
         );
 
+        Self::convert_endianness(data);
+
         Ok(())
     }
 
     /// Writes a buffer of u16 values to the given memory address in the controller ram
     /// Buffer needs to be aligned to u16!
-    pub fn memory_burst_write(&mut self, memory_address: u32, data: &[u8]) -> Result<(), Error> {
+    pub fn memory_burst_write(
+        &mut self,
+        memory_address: u32,
+        data: &mut [u8],
+    ) -> Result<(), Error> {
         let args = [
             memory_address as u16,
             (memory_address >> 16) as u16,
@@ -403,6 +409,8 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         ];
         self.interface
             .write_command_with_args(command::IT8951_TCON_MEM_BST_WR, &args)?;
+
+        Self::convert_endianness(data);
 
         self.interface.write_multi_data(data)?;
 
@@ -547,9 +555,7 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
         let mut buf = [0x0000; 40];
         self.interface.read_multi_data(&mut buf)?;
 
-        for i in (0..buf.len() - 1).step_by(2) {
-            buf.swap(i, i + 1)
-        }
+        Self::convert_endianness(&mut buf);
 
         Ok(DevInfo {
             panel_width: u16::from_be_bytes([buf[1], buf[0]]),
@@ -558,6 +564,16 @@ impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, Run> {
             firmware_version: Self::buf_to_str(&buf[8..24]),
             lut_version: Self::buf_to_str(&buf[25..40]),
         })
+    }
+
+    fn convert_endianness(buffer: &mut [u8]) {
+        if !buffer.len().is_multiple_of(2) {
+            panic!("Buffer needs to be align on u16");
+        }
+
+        for i in (0..buffer.len() - 1).step_by(2) {
+            buffer.swap(i, i + 1)
+        }
     }
 
     fn buf_to_str(buffer: &[u8]) -> String {
