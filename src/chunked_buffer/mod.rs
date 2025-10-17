@@ -1,6 +1,10 @@
+//! Chunked Buffer strategy for processing data
+
 mod area_serializer;
 mod pixel_serializer;
 mod serialization_helper;
+
+use core::{marker::PhantomData, ops::Deref};
 
 use embedded_graphics_core::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
@@ -11,11 +15,82 @@ use crate::{
     interface,
     memory_converter_settings::{self, MemoryConverterSetting},
     origin::Origin,
-    AreaImgInfo, Error, Run, IT8951,
+    AreaImgInfo, Buffer, Error, Run, IT8951,
 };
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
-    for IT8951<IT8951Interface, TOrigin, Run>
+trait ChunkedBuffer: Buffer {
+    type BufferType: Deref<Target = [u8]>;
+
+    fn max_size(&self) -> usize;
+    fn buffer(&self, initial_value: u8, size: usize) -> Self::BufferType;
+}
+
+/// A (statically) allocated fixed length buffer
+pub struct FixedBuffer<'a, const N: usize> {
+    scratch_buffer: &'a [u8; N],
+}
+
+impl<'a, const N: usize> FixedBuffer<'a, N> {
+    /// Iinitializes a new fixed buffer
+    pub fn new(buffer: &'a [u8; N]) -> Self {
+        Self {
+            scratch_buffer: buffer,
+        }
+    }
+}
+
+impl<'a, const N: usize> Buffer for FixedBuffer<'a, N> {}
+
+impl<'a, const N: usize> ChunkedBuffer for FixedBuffer<'a, N> {
+    type BufferType = &'a [u8];
+
+    fn max_size(&self) -> usize {
+        N
+    }
+
+    fn buffer(&self, _: u8, size: usize) -> Self::BufferType {
+        &self.scratch_buffer[0..size]
+    }
+}
+
+/// A (dynamically) allocated buffer
+pub struct AllocBuffer<'a> {
+    /// Max buffer size in bytes for staging buffers
+    /// The buffer should be large enough to at least contain the pixels of a complete row
+    /// The buffer must be aligned to u16
+    /// The used IT8951 interface must support to write a complete buffer at once
+    pub max_buffer_size: usize,
+    phantom_data: PhantomData<&'a usize>,
+}
+
+impl<'a> AllocBuffer<'a> {
+    /// Initialize a new buffer with a given max size
+    pub fn new(max_buffer_size: usize) -> Self {
+        Self {
+            max_buffer_size,
+            phantom_data: PhantomData {},
+        }
+    }
+}
+
+impl<'a> Buffer for AllocBuffer<'a> {}
+
+impl<'a> ChunkedBuffer for AllocBuffer<'a> {
+    type BufferType = alloc::vec::Vec<u8>;
+
+    fn max_size(&self) -> usize {
+        self.max_buffer_size
+    }
+
+    fn buffer(&self, initial_value: u8, size: usize) -> Self::BufferType {
+        vec![initial_value; size]
+    }
+}
+
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    DrawTarget for IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>
+where
+    BufferStrategy: ChunkedBuffer,
 {
     type Color = Gray4;
 
@@ -44,7 +119,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
             return Ok(());
         }
 
-        let a = AreaSerializer::new(area, color, self.config.max_buffer_size);
+        let a = AreaSerializer::new(area, color, &mut self.buffer);
         let area_iter = AreaSerializerIterator::new(&a);
         let memory_address = self
             .dev_info

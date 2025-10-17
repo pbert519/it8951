@@ -11,7 +11,7 @@ extern crate alloc;
 use core::{borrow::Borrow, marker::PhantomData};
 use heapless::String;
 
-mod chunked_buffer;
+pub mod chunked_buffer;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
@@ -154,57 +154,71 @@ pub struct PowerDown;
 /// Not initalised driver after a power cycle
 pub struct Off;
 
+/// Type of buffer being used drawing operations
+pub trait Buffer {}
+
 /// IT8951 e paper driver
 /// The controller supports multiple interfaces
-pub struct IT8951<IT8951Interface, TOrigin: Origin, State> {
+pub struct IT8951<IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer, State> {
     interface: IT8951Interface,
     dev_info: Option<DevInfo>,
     marker: core::marker::PhantomData<State>,
     origin: core::marker::PhantomData<TOrigin>,
+    buffer: BufferStrategy,
     config: Config,
 }
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, TState>
-    IT8951<IT8951Interface, TOrigin, TState>
+impl<
+        IT8951Interface: interface::IT8951Interface,
+        TOrigin: Origin,
+        BufferStrategy: Buffer,
+        TState,
+    > IT8951<IT8951Interface, TOrigin, BufferStrategy, TState>
 {
-    fn into_state<TNew>(self) -> IT8951<IT8951Interface, TOrigin, TNew> {
-        IT8951::<IT8951Interface, TOrigin, TNew> {
+    fn into_state<TNew>(self) -> IT8951<IT8951Interface, TOrigin, BufferStrategy, TNew> {
+        IT8951::<IT8951Interface, TOrigin, BufferStrategy, TNew> {
             interface: self.interface,
             dev_info: self.dev_info,
             marker: PhantomData {},
             origin: PhantomData {},
+            buffer: self.buffer,
             config: self.config,
         }
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface> IT8951<IT8951Interface, OriginTopLeft, Off> {
+impl<IT8951Interface: interface::IT8951Interface, BufferStrategy: Buffer>
+    IT8951<IT8951Interface, OriginTopLeft, BufferStrategy, Off>
+{
     /// Creates a new controller driver object
     /// Call init afterwards to initalize the controller
     pub fn new(
         interface: IT8951Interface,
         config: Config,
-    ) -> IT8951<IT8951Interface, OriginTopLeft, Off> {
-        Self::new_with_origin(interface, config, OriginTopLeft {})
+        buffer: BufferStrategy,
+    ) -> IT8951<IT8951Interface, OriginTopLeft, BufferStrategy, Off> {
+        Self::new_with_origin(interface, config, buffer, OriginTopLeft {})
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
-    IT8951<IT8951Interface, TOrigin, Off>
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    IT8951<IT8951Interface, TOrigin, BufferStrategy, Off>
 {
     /// Creates a new controller driver object with a customized origin type
     /// Call init afterwards to initalize the controller
     pub fn new_with_origin(
         mut interface: IT8951Interface,
         config: Config,
+        buffer: BufferStrategy,
         _: TOrigin,
-    ) -> IT8951<IT8951Interface, TOrigin, Off> {
+    ) -> IT8951<IT8951Interface, TOrigin, BufferStrategy, Off> {
         interface.set_busy_timeout(config.timeout_interface);
         IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
             origin: PhantomData {},
+            buffer,
             config,
         }
     }
@@ -212,7 +226,10 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
     /// Since version 0.4.0, this function no longer resets the display
-    pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
+    pub fn init(
+        mut self,
+        vcom: u16,
+    ) -> Result<IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>, Error> {
         self.interface.reset()?;
 
         let mut it8951 = self.into_state::<PowerDown>().sys_run()?;
@@ -250,14 +267,16 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     pub fn attach(
         mut interface: IT8951Interface,
         config: Config,
-    ) -> Result<IT8951<IT8951Interface, OriginTopLeft, Run>, Error> {
+        buffer: BufferStrategy,
+    ) -> Result<IT8951<IT8951Interface, OriginTopLeft, BufferStrategy, Run>, Error> {
         interface.set_busy_timeout(config.timeout_interface);
 
-        let mut it8951: IT8951<IT8951Interface, OriginTopLeft, Run> = IT8951 {
+        let mut it8951: IT8951<IT8951Interface, OriginTopLeft, BufferStrategy, Run> = IT8951 {
             interface,
             dev_info: None,
             marker: PhantomData {},
             origin: PhantomData {},
+            buffer,
             config,
         }
         .sys_run()?;
@@ -280,8 +299,25 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
-    IT8951<IT8951Interface, TOrigin, Run>
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>
+where
+    IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>: DrawTarget<Color = Gray4, Error = Error>,
+{
+    /// initalize the frame buffer and clear the display to white
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.clear(Gray4::WHITE)?;
+        self.display(WaveformMode::Init)?;
+
+        #[cfg(feature = "defmt")]
+        defmt::trace!("Cleared display");
+
+        Ok(())
+    }
+}
+
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>
 {
     /// Get the Device information
     pub fn get_dev_info(&self) -> DevInfo {
@@ -295,17 +331,6 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
 
         #[cfg(feature = "defmt")]
         defmt::warn!("Increased driver strength!");
-
-        Ok(())
-    }
-
-    /// initalize the frame buffer and clear the display to white
-    pub fn reset(&mut self) -> Result<(), Error> {
-        self.clear(Gray4::WHITE)?;
-        self.display(WaveformMode::Init)?;
-
-        #[cfg(feature = "defmt")]
-        defmt::trace!("Cleared display");
 
         Ok(())
     }
@@ -549,7 +574,9 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
 
     /// Activate sleep power mode
     /// All clocks, pll, osc and the panel are off, but the ram is refreshed
-    pub fn sleep(mut self) -> Result<IT8951<IT8951Interface, TOrigin, PowerDown>, Error> {
+    pub fn sleep(
+        mut self,
+    ) -> Result<IT8951<IT8951Interface, TOrigin, BufferStrategy, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_SLEEP)?;
 
         #[cfg(feature = "defmt")]
@@ -560,7 +587,9 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
 
     /// Activate standby power mode
     /// Clocks are gated off, but pll, osc, panel power and ram is active
-    pub fn standby(mut self) -> Result<IT8951<IT8951Interface, TOrigin, PowerDown>, Error> {
+    pub fn standby(
+        mut self,
+    ) -> Result<IT8951<IT8951Interface, TOrigin, BufferStrategy, PowerDown>, Error> {
         self.interface.write_command(command::IT8951_TCON_STANDBY)?;
 
         #[cfg(feature = "defmt")]
@@ -668,12 +697,14 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     }
 }
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
-    IT8951<IT8951Interface, TOrigin, PowerDown>
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    IT8951<IT8951Interface, TOrigin, BufferStrategy, PowerDown>
 {
     /// Activate active power mode
     /// This is the normal operation power mode
-    pub fn sys_run(mut self) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
+    pub fn sys_run(
+        mut self,
+    ) -> Result<IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>, Error> {
         self.interface.write_command(command::IT8951_TCON_SYS_RUN)?;
 
         #[cfg(feature = "defmt")]
@@ -686,8 +717,8 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
 use crate::origin::{Origin, OriginTopLeft};
 use embedded_graphics_core::{pixelcolor::Gray4, prelude::*};
 
-impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> OriginDimensions
-    for IT8951<IT8951Interface, TOrigin, Run>
+impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin, BufferStrategy: Buffer>
+    OriginDimensions for IT8951<IT8951Interface, TOrigin, BufferStrategy, Run>
 {
     fn size(&self) -> Size {
         let dev_info = self.dev_info.as_ref().unwrap();
