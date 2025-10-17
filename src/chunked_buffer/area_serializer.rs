@@ -1,4 +1,4 @@
-use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo};
+use crate::{chunked_buffer::serialization_helper::get_nibbles_per_row, AreaImgInfo};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::{Gray4, GrayColor},

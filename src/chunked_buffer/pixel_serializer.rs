@@ -1,6 +1,6 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
-use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo, Origin};
+use crate::{chunked_buffer::serialization_helper::get_nibbles_per_row, AreaImgInfo, Origin};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::Gray4,
