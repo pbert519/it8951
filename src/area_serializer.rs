@@ -1,4 +1,4 @@
-use crate::{serialization_helper::get_entires_per_row, AreaImgInfo};
+use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::{Gray4, GrayColor},
@@ -22,7 +22,7 @@ impl AreaSerializer {
             "Buffer size must be aligned to u16"
         );
         // calculate the buffer size
-        let entries_per_row = get_entires_per_row(area) as usize * 2; // convert length from u16 to u8
+        let entries_per_row = get_nibbles_per_row(area) as usize * 2; // convert length from u16 to u8
         let rows_per_step = (buffer_size / entries_per_row).min(area.size.height as usize);
         assert!(rows_per_step > 0, "Buffer size to small for one row");
         let buffer = vec![data_entry; entries_per_row * rows_per_step];

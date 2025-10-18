@@ -1,7 +1,5 @@
 # Driver for IT8951 E-Paper display
 
-This crate is mainly developed for the waveshare 7.8" epaper display using spi:
-https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT
 The driver uses the embedded_hal traits as hardware abstraction layer.
 This driver can be used with the embedded graphics trait, currently only supporing Gray4 (16bit grayscale).
 
@@ -12,6 +10,14 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - The crates uses the alloc feature to allocate memory on the heap:
     - Firmware and LUT version string read from the controller
     - Staging buffers to write pixel to the controller. The buffers are allocated as needed, but only one buffer at a time and with up to `Config::max_buffer_size`, which is 1kByte per default.
+
+## Supported devices
+
+It should support all waveshare devices using the IT8951 controller over SPI.
+These e-ink screens are known to be working
+
+* [7.8 inch, 1872×1404 pixels, 4-bit grayscale](https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT)
+* [10.3 inch, 1872×1404 pixels, 4-bit grayscale](https://www.waveshare.com/wiki/10.3inch_e-Paper_HAT) **Important** This screen needs to be initialized with origin of `TopRight` to be working correctly
 
 ## Performance Considerations
 Always prefer the embedded_graphics `fill_solid` and `fill_contiguous` functions over `draw_iter`.
@@ -42,6 +48,7 @@ We are currently discussing approaches without alloc. If you have any opinion on
 
 ### Unreleased
 - Add optional defmt support
+- Add display origin support (fixes mirroring on certain devices)
 
 ### 0.4.2
 - add display rotation support

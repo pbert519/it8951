@@ -2,7 +2,7 @@ use embedded_graphics_core::primitives::Rectangle;
 
 /// Calculates how many u16 values are necessary per line on the display.
 /// This includes the correct alignment
-pub fn get_entires_per_row(area: Rectangle) -> u32 {
+pub fn get_nibbles_per_row(area: Rectangle) -> u32 {
     const PIXEL_PER_WORD: u32 = 4;
 
     let alignment_pixels = area.top_left.x as u32 % 4;
@@ -16,19 +16,19 @@ mod tests {
 
     use super::*;
 
-    macro_rules! get_entires_per_row_tests {
+    macro_rules! get_nibbles_per_row_tests {
         ($($name:ident: $value:expr,)*) => {
         $(
             #[test]
             fn $name() {
                 let (offset, width, expected) = $value;
-                assert_eq!(expected, get_entires_per_row(Rectangle::new(Point::new(offset, 0), Size::new(width, 1))));
+                assert_eq!(expected, get_nibbles_per_row(Rectangle::new(Point::new(offset, 0), Size::new(width, 1))));
             }
         )*
         }
     }
 
-    get_entires_per_row_tests! {
+    get_nibbles_per_row_tests! {
         aligned_0: (0, 0, 0),
         aligned_1: (0, 1, 1),
         aligned_2: (0, 2, 1),
