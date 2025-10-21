@@ -1,3 +1,4 @@
+use it8951::chunked_buffer::FixedBuffer;
 use it8951::Config;
 use linux_embedded_hal::gpio_cdev::{Chip, LineRequestFlags};
 use linux_embedded_hal::spidev::{SpiModeFlags, SpidevOptions};
@@ -35,7 +36,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let busy = CdevPin::new(busy_input_handle)?;
 
     let driver = it8951::interface::IT8951SPIInterface::new(spi, busy, rst, Delay);
-    let mut epd = it8951::IT8951::new(driver, Config::default())
+    let staging_buffer = [0; 1024];
+    let staging_buffer = FixedBuffer::new(&staging_buffer);
+
+    let mut epd = it8951::IT8951::new(driver, Config::default(), staging_buffer)
         .init(1670)
         .unwrap();
 

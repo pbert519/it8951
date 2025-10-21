@@ -1,84 +1,107 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
-use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo, Origin};
-use alloc::vec::Vec;
+use crate::{chunked_buffer::{serialization_helper::get_nibbles_per_row, ChunkedBuffer}, AreaImgInfo, Origin};
+use embedded_graphics_core::prelude::GrayColor;
 use embedded_graphics_core::{
     pixelcolor::Gray4,
-    prelude::*,
     primitives::{PointsIter, Rectangle},
     Pixel,
 };
 
 /// Converts a list of Pixels (pos, color) into frame buffer segements with area information.
-pub struct PixelSerializer<I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin> {
+pub struct PixelSerializer<TOrigin: Origin, T: ChunkedBuffer> {
     area: Rectangle,
-    pixels: I,
     row: usize,
-    max_entries: usize,
+    nibbles_per_row: usize,
+    max_rows_per_iter: usize,
+    pub buffer: T::BufferType,
     origin: PhantomData<TOrigin>,
 }
 
-impl<I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin> PixelSerializer<I, TOrigin> {
-    pub fn new(area: Rectangle, pixels: I, size: usize) -> Self {
+impl<TOrigin: Origin, T: ChunkedBuffer> PixelSerializer<TOrigin, T> {
+    pub fn new(area: Rectangle, buffer: &mut T) -> Self {
+        // prepare buffer with enough capacity
+        let nibbles_per_row = get_nibbles_per_row(area) as usize * 2; // convert length to bytes
+        let max_rows_per_iter =
+            (buffer.max_size() / nibbles_per_row).min(area.size.height as usize);
+        assert!(max_rows_per_iter > 0, "Buffer size to small for one row");
+
         PixelSerializer {
             area,
-            pixels,
             row: 0,
-            // 1kByte
-            max_entries: size,
+            nibbles_per_row,
+            max_rows_per_iter,
+            buffer: buffer.buffer(0, 1024),
             origin: PhantomData {},
         }
     }
 }
 
-impl<I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin> Iterator for PixelSerializer<I, TOrigin> {
-    type Item = (AreaImgInfo, Vec<u8>);
+pub struct PixelSerializerIterator<'a, I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin, T: ChunkedBuffer>
+where
+    T: ChunkedBuffer,
+{
+    pixel_serializer: &'a mut PixelSerializer<TOrigin, T>,
+    pixels: I,
+    row: usize,
+}
+
+impl<'a, I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin, T: ChunkedBuffer> PixelSerializerIterator<'a, I, TOrigin, T>
+where
+    T: ChunkedBuffer,
+{
+    pub fn new(pixel_serializer: &'a mut PixelSerializer<TOrigin, T>, pixels: I) -> PixelSerializerIterator<'a, I, TOrigin, T> {
+        PixelSerializerIterator {
+            pixel_serializer,
+            pixels,
+            row: 0,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin, TBuffer: ChunkedBuffer> Iterator for PixelSerializerIterator<'a, I, TOrigin, TBuffer> {
+    type Item = AreaImgInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.row >= self.area.size.height as usize {
+        if self.row >= self.pixel_serializer.area.size.height as usize {
             return None;
         }
 
         let start_row = self.row;
 
-        // prepare buffer with enough capacity
-        let nibbles_per_row = get_nibbles_per_row(self.area) as usize * 2; // convert length to bytes
-        let max_rows_per_iter =
-            (self.max_entries / nibbles_per_row).min(self.area.size.height as usize);
-        assert!(max_rows_per_iter > 0, "Buffer size to small for one row");
+        
         // Make sure to not overallocate at the end of the area
-        let number_of_rows_for_iter =
-            max_rows_per_iter.min(self.area.size.height as usize - self.row);
+        // let number_of_rows_for_iter =
+        //     max_rows_per_iter.min(self.area.size.height as usize - self.row);
 
-        let mut bytes = vec![0x00; nibbles_per_row * number_of_rows_for_iter];
+        //let mut bytes = self.buffer.buffer(0x00, nibbles_per_row * number_of_rows_for_iter);
 
         // add all pixels to buffer
         for Pixel(point, color) in self.pixels.by_ref() {
             // calculate the which u16 (pair of two bytes) the pixel is in
             let (byte_pos, bit_pos) =
-                TOrigin::bit_and_byte_pos(&self.area, point, nibbles_per_row, self.row, start_row);
+                TOrigin::bit_and_byte_pos(&self.pixel_serializer.area, point, self.pixel_serializer.nibbles_per_row, self.row, start_row);
 
-            bytes[byte_pos] |= (color.luma()) << bit_pos;
+            self.pixel_serializer.buffer[byte_pos] |= (color.luma()) << bit_pos;
 
             //  end of row
-            if point.x >= self.area.top_left.x + self.area.size.width as i32 - 1 {
+            if point.x >= self.pixel_serializer.area.top_left.x + self.pixel_serializer.area.size.width as i32 - 1 {
                 self.row += 1;
             }
             // abort if all rows are written to buffer
-            if self.row >= max_rows_per_iter + start_row {
+            if self.row >= self.pixel_serializer.max_rows_per_iter + start_row {
                 break;
             }
         }
 
-        Some((
+        Some(
             AreaImgInfo {
-                area_x: self.area.top_left.x as u16,
-                area_y: (self.area.top_left.y + start_row as i32) as u16,
-                area_w: self.area.size.width as u16,
+                area_x: self.pixel_serializer.area.top_left.x as u16,
+                area_y: (self.pixel_serializer.area.top_left.y + start_row as i32) as u16,
+                area_w: self.pixel_serializer.area.size.width as u16,
                 area_h: (self.row - start_row) as u16,
-            },
-            bytes,
-        ))
+            }
+        )
     }
 }
 
