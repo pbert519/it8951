@@ -4,14 +4,14 @@ mod area_serializer;
 mod pixel_serializer;
 mod serialization_helper;
 
-use core::{marker::PhantomData, ops::Deref};
+use core::{marker::PhantomData, ops::{Deref, DerefMut}};
 
 use embedded_graphics_core::{pixelcolor::Gray4, prelude::*, primitives::Rectangle};
 
 use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
 use crate::{
-    chunked_buffer::area_serializer::{AreaSerializer, AreaSerializerIterator},
+    chunked_buffer::{area_serializer::{AreaSerializer, AreaSerializerIterator}, pixel_serializer::PixelSerializerIterator},
     interface,
     memory_converter_settings::{self, MemoryConverterSetting},
     origin::Origin,
@@ -19,39 +19,39 @@ use crate::{
 };
 
 trait ChunkedBuffer: Buffer {
-    type BufferType: Deref<Target = [u8]>;
+    type BufferType: DerefMut<Target = [u8]>;
 
     fn max_size(&self) -> usize;
     fn buffer(&self, initial_value: u8, size: usize) -> Self::BufferType;
 }
 
 /// A (statically) allocated fixed length buffer
-pub struct FixedBuffer<'a, const N: usize> {
-    scratch_buffer: &'a [u8; N],
-}
+// pub struct FixedBuffer<'a, const N: usize> {
+//     scratch_buffer: &'a [u8; N],
+// }
 
-impl<'a, const N: usize> FixedBuffer<'a, N> {
-    /// Iinitializes a new fixed buffer
-    pub fn new(buffer: &'a [u8; N]) -> Self {
-        Self {
-            scratch_buffer: buffer,
-        }
-    }
-}
+// impl<'a, const N: usize> FixedBuffer<'a, N> {
+//     /// Iinitializes a new fixed buffer
+//     pub fn new(buffer: &'a [u8; N]) -> Self {
+//         Self {
+//             scratch_buffer: buffer,
+//         }
+//     }
+// }
 
-impl<'a, const N: usize> Buffer for FixedBuffer<'a, N> {}
+// impl<'a, const N: usize> Buffer for FixedBuffer<'a, N> {}
 
-impl<'a, const N: usize> ChunkedBuffer for FixedBuffer<'a, N> {
-    type BufferType = &'a [u8];
+// impl<'a, const N: usize> ChunkedBuffer for FixedBuffer<'a, N> {
+//     type BufferType = &'a [u8];
 
-    fn max_size(&self) -> usize {
-        N
-    }
+//     fn max_size(&self) -> usize {
+//         N
+//     }
 
-    fn buffer(&self, _: u8, size: usize) -> Self::BufferType {
-        &self.scratch_buffer[0..size]
-    }
-}
+//     fn buffer(&self, _: u8, size: usize) -> Self::BufferType {
+//         &self.scratch_buffer[0..size]
+//     }
+// }
 
 /// A (dynamically) allocated buffer
 pub struct AllocBuffer<'a> {
@@ -157,13 +157,16 @@ where
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        let pixel = PixelSerializer::<_, TOrigin>::new(
+        let mut pixel = PixelSerializer::<TOrigin, _>::new(
             area.intersection(&bb),
-            iter,
-            self.config.max_buffer_size,
+            &mut self.buffer,
+        );
+        let pixel_iterator = PixelSerializerIterator::<_, TOrigin, _>::new(
+            &mut pixel,
+            iter
         );
 
-        for (mut area_img_info, buffer) in pixel {
+        for mut area_img_info in pixel_iterator {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
@@ -172,7 +175,7 @@ where
                     ..Default::default()
                 },
                 &mut area_img_info,
-                &buffer,
+                &pixel.buffer,
             )?;
         }
 
