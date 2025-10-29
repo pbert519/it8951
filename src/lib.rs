@@ -731,11 +731,12 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        for (mut area_img_info, buffer) in area_iter {
+        for (mut area_img_info, buffer, bpp) in area_iter {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
                     rotation: (&self.config.rotation).into(),
+                    bit_per_pixel: bpp,
                     ..Default::default()
                 },
                 &mut area_img_info,

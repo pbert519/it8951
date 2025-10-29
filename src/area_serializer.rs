@@ -1,4 +1,4 @@
-use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo};
+use crate::{AreaImgInfo, memory_converter_settings::MemoryConverterBitPerPixel, serialization_helper::get_u16_per_row};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::{Gray4, GrayColor},
@@ -10,19 +10,28 @@ pub struct AreaSerializer {
     area: Rectangle,
     rows_per_step: usize,
     buffer: Vec<u8>,
+    bpp: MemoryConverterBitPerPixel,
 }
 
 impl AreaSerializer {
     pub fn new(area: Rectangle, color: Gray4, buffer_size: usize) -> Self {
         let raw_color = color.luma();
-        let data_entry = raw_color << 4 | raw_color;
 
         assert!(
             buffer_size.is_multiple_of(2),
             "Buffer size must be aligned to u16"
         );
+
+        // Check if color can be represented by two bits per pixel
+        let (bpp, data_entry) = if (color.luma() & 0b11) == 0 {
+            let raw_color = raw_color >> 2;
+            (MemoryConverterBitPerPixel::BitsPerPixel2, raw_color << 6 | raw_color << 4 |raw_color << 2 | raw_color)
+        } else {
+            (MemoryConverterBitPerPixel::BitsPerPixel4, raw_color << 4 | raw_color)
+        };
+
         // calculate the buffer size
-        let entries_per_row = get_nibbles_per_row(area) as usize * 2; // convert length from u16 to u8
+        let entries_per_row = get_u16_per_row(area, bpp.get_bits_per_pixel()) as usize * 2; // convert length from u16 to u8
         let rows_per_step = (buffer_size / entries_per_row).min(area.size.height as usize);
         assert!(rows_per_step > 0, "Buffer size to small for one row");
         let buffer = vec![data_entry; entries_per_row * rows_per_step];
@@ -31,6 +40,7 @@ impl AreaSerializer {
             area,
             rows_per_step,
             buffer,
+            bpp
         }
     }
 }
@@ -49,7 +59,7 @@ impl<'a> AreaSerializerIterator<'a> {
 }
 
 impl<'a> Iterator for AreaSerializerIterator<'a> {
-    type Item = (AreaImgInfo, &'a [u8]);
+    type Item = (AreaImgInfo, &'a [u8], MemoryConverterBitPerPixel);
 
     fn next(&mut self) -> Option<Self::Item> {
         let area_height = self.area_serializer.area.size.height;
@@ -69,6 +79,7 @@ impl<'a> Iterator for AreaSerializerIterator<'a> {
                 area_h: (self.row - start_row) as u16,
             },
             &self.area_serializer.buffer,
+            self.area_serializer.bpp,
         ))
     }
 }
@@ -111,7 +122,8 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -142,7 +154,8 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -172,7 +185,8 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -202,7 +216,8 @@ mod tests {
                     area_w: 1,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -234,7 +249,8 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -265,7 +281,8 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -293,7 +310,8 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(
@@ -305,7 +323,8 @@ mod tests {
                     area_w: 4,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -333,7 +352,8 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(
@@ -345,7 +365,8 @@ mod tests {
                     area_w: 3,
                     area_h: 1
                 },
-                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -376,7 +397,8 @@ mod tests {
                     area_w: 4,
                     area_h: 2
                 },
-                [0xAA, 0xAA, 0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -407,7 +429,8 @@ mod tests {
                     area_w: 3,
                     area_h: 2
                 },
-                [0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
             ))
         );
         assert_eq!(s.next(), None);
@@ -438,7 +461,40 @@ mod tests {
                     area_w: 2,
                     area_h: 1
                 },
-                [0xAA, 0xAA].as_slice()
+                [0xAA, 0xAA].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel4
+            ))
+        );
+        assert_eq!(s.next(), None);
+    }
+
+    #[test]
+    // single pixel in bounding box at pos 0
+    fn test_pixel_2bpp() {
+        let area = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            size: Size {
+                width: 1,
+                height: 1,
+            },
+        };
+        let area_s = AreaSerializer::new(
+            area.intersection(&BOUNDING_BOX_DEFAULT),
+            Gray4::new(0x4),
+            1024,
+        );
+        let mut s = AreaSerializerIterator::new(&area_s);
+        assert_eq!(
+            s.next(),
+            Some((
+                AreaImgInfo {
+                    area_x: 0,
+                    area_y: 0,
+                    area_w: 1,
+                    area_h: 1
+                },
+                [0x55, 0x55].as_slice(),
+                MemoryConverterBitPerPixel::BitsPerPixel2
             ))
         );
         assert_eq!(s.next(), None);

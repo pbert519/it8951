@@ -1,6 +1,6 @@
 use core::{borrow::Borrow, marker::PhantomData};
 
-use crate::{serialization_helper::get_nibbles_per_row, AreaImgInfo, Origin};
+use crate::{serialization_helper::get_u16_per_row, AreaImgInfo, Origin};
 use alloc::vec::Vec;
 use embedded_graphics_core::{
     pixelcolor::Gray4,
@@ -42,21 +42,21 @@ impl<I: Iterator<Item = Pixel<Gray4>>, TOrigin: Origin> Iterator for PixelSerial
         let start_row = self.row;
 
         // prepare buffer with enough capacity
-        let nibbles_per_row = get_nibbles_per_row(self.area) as usize * 2; // convert length to bytes
+        let u16_per_row = get_u16_per_row(self.area, 4) as usize * 2; // convert length to bytes
         let max_rows_per_iter =
-            (self.max_entries / nibbles_per_row).min(self.area.size.height as usize);
+            (self.max_entries / u16_per_row).min(self.area.size.height as usize);
         assert!(max_rows_per_iter > 0, "Buffer size to small for one row");
         // Make sure to not overallocate at the end of the area
         let number_of_rows_for_iter =
             max_rows_per_iter.min(self.area.size.height as usize - self.row);
 
-        let mut bytes = vec![0x00; nibbles_per_row * number_of_rows_for_iter];
+        let mut bytes = vec![0x00; u16_per_row * number_of_rows_for_iter];
 
         // add all pixels to buffer
         for Pixel(point, color) in self.pixels.by_ref() {
             // calculate the which u16 (pair of two bytes) the pixel is in
             let (byte_pos, bit_pos) =
-                TOrigin::bit_and_byte_pos(&self.area, point, nibbles_per_row, self.row, start_row);
+                TOrigin::bit_and_byte_pos(&self.area, point, u16_per_row, self.row, start_row);
 
             bytes[byte_pos] |= (color.luma()) << bit_pos;
 

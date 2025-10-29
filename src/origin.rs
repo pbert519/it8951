@@ -19,7 +19,7 @@ mod private {
         fn bit_and_byte_pos(
             area: &Rectangle,
             point: Point,
-            nibbles_per_row: usize,
+            u16_per_row: usize,
             row: usize,
             start_row: usize,
         ) -> (usize, i32);
@@ -35,12 +35,12 @@ mod private {
         fn bit_and_byte_pos(
             area: &Rectangle,
             point: Point,
-            nibbles_per_row: usize,
+            u16_per_row: usize,
             row: usize,
             start_row: usize,
         ) -> (usize, i32) {
             let u16_pos = ((point.x - (area.top_left.x / 4 * 4)) / 2) as usize
-                + nibbles_per_row * (row - start_row);
+                + u16_per_row * (row - start_row);
 
             // swap last pixel to map little endian behavior
             let byte_pos = u16_pos.bitxor(0x00001);
@@ -64,13 +64,13 @@ mod private {
         fn bit_and_byte_pos(
             area: &Rectangle,
             point: Point,
-            nibbles_per_row: usize,
+            u16_per_row: usize,
             row: usize,
             start_row: usize,
         ) -> (usize, i32) {
             let u16_pos =
-                nibbles_per_row - 1 - ((point.x - (area.top_left.x / 4 * 4)) / 2) as usize
-                    + nibbles_per_row * (row - start_row);
+                u16_per_row - 1 - ((point.x - (area.top_left.x / 4 * 4)) / 2) as usize
+                    + u16_per_row * (row - start_row);
 
             // swap last pixel to map little endian behavior
             let byte_pos = u16_pos.bitxor(0x00001);
