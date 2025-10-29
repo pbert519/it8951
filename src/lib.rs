@@ -596,7 +596,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
             panel_height: u16::from_be_bytes([buf[3], buf[2]]),
             memory_address: u32::from_be_bytes([buf[7], buf[6], buf[5], buf[4]]),
             firmware_version: Self::buf_to_str(&buf[8..24]),
-            lut_version: Self::buf_to_str(&buf[25..40]),
+            lut_version: Self::buf_to_str(&buf[24..40]),
         })
     }
 
