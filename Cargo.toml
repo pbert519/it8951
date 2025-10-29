@@ -18,8 +18,9 @@ defmt = { version = "^1.0.1", optional = true }
 heapless = "0.9.1"
 
 [features]
-# Adds defmt support
+default = ["alloc"]
 defmt = ["dep:defmt", "embedded-graphics-core/defmt", "heapless/defmt"]
+alloc = []
 
 [dev-dependencies]
 linux-embedded-hal = "0.4"

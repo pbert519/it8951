@@ -38,6 +38,13 @@ Meaning the required heap is minimized, but new allocations & releases may happe
 
 We are currently discussing approaches without alloc. If you have any opinion on this please get in touch. 
 
+
+### no alloc support
+Allocations are enabled by default but can be disabled by `--no-default-features`.
+Without alloc, the optimized `fill_solid` and `fill_contiguous` are not available, but there is still basic support for embedded_graphics using `draw_iter`.
+Non embedded graphics functions are not impacted.
+
+
 ## TODOs
 - Support Gray2 and Gray8 with embedded-graphics
 - Support display engine fill area
@@ -49,6 +56,7 @@ We are currently discussing approaches without alloc. If you have any opinion on
 ### Unreleased
 - Add optional defmt support
 - Add display origin support (fixes mirroring on certain devices)
+- New default feature 'alloc'. When disabled, this crate does not use any allocations, but the performance is highly decreased.
 
 ### 0.4.2
 - add display rotation support

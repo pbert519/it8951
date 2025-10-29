@@ -5,23 +5,29 @@
 //! The implementation is based on the IT8951 I80/SPI/I2C programming guide
 //! provided by waveshare: https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT
 
+#[cfg(feature = "alloc")]
 #[macro_use]
 extern crate alloc;
 
 use core::{borrow::Borrow, marker::PhantomData};
 use heapless::String;
 
+#[cfg(feature = "alloc")]
 mod area_serializer;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
 pub mod origin;
+#[cfg(feature = "alloc")]
 mod pixel_serializer;
 mod register;
+#[cfg(feature = "alloc")]
 mod serialization_helper;
 
+#[cfg(feature = "alloc")]
 use area_serializer::{AreaSerializer, AreaSerializerIterator};
 use memory_converter_settings::MemoryConverterSetting;
+#[cfg(feature = "alloc")]
 use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
 #[cfg(feature = "defmt")]
@@ -715,6 +721,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
         )
     }
 
+    #[cfg(feature = "alloc")]
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         // only update visible content
         let area = area.intersection(&self.bounding_box());
@@ -749,6 +756,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
         Ok(())
     }
 
+    #[cfg(feature = "alloc")]
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,
