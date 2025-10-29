@@ -7,8 +7,8 @@ This driver can be used with the embedded graphics trait, currently only suppori
 - IT8951 has a image load engine which can convert pixel data before storing it in the local frame  buffer.
 - It is possible to read and write the memory directly without using the image load engine
 - **Important** Data must be always aligned to 16bit words!
-- The crates uses the alloc feature to allocate memory on the heap:
-    - Firmware and LUT version string read from the controller
+- The crates uses by default the alloc feature to allocate memory on the heap:
+    - alloc can be disabled by deactivating the `alloc` default feature, but performance for the `embedded_graphics_core::DrawTarget` functions will then be significantly worse. 
     - Staging buffers to write pixel to the controller. The buffers are allocated as needed, but only one buffer at a time and with up to `Config::max_buffer_size`, which is 1kByte per default.
 
 ## Supported devices
