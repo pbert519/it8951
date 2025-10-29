@@ -40,6 +40,7 @@ We are currently discussing approaches without alloc. If you have any opinion on
 
 ## TODOs
 - Support Gray2 and Gray8 with embedded-graphics
+    -> No displays are currently in scope / known with 4 or 256 grayscale colors.
 - Support display engine fill area
 - Support display engine 1 bit per pixel mode
 - Support static buffer allocations
@@ -49,6 +50,7 @@ We are currently discussing approaches without alloc. If you have any opinion on
 ### Unreleased
 - Add optional defmt support
 - Add display origin support (fixes mirroring on certain devices)
+- Switch to 2bpp for `fill_solid` if color is 0 (Black), 4, 8 or 12. White is not supported. This halves the transfer size.
 
 ### 0.4.2
 - add display rotation support

@@ -4,7 +4,7 @@ use crate::Rotation;
 
 /// Endianness of the pixel data send to the controller
 #[repr(u16)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum MemoryConverterEndianness {
     /// pixel data is little endian
     LittleEndian = 0,
@@ -15,7 +15,7 @@ pub enum MemoryConverterEndianness {
 /// Bits per pixel
 /// the pixel data send to the controller can encode the pixels with a different number of bits
 #[repr(u16)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MemoryConverterBitPerPixel {
     /// each pixel value is given by 2 bits
     BitsPerPixel2 = 0b00,
@@ -29,7 +29,7 @@ pub enum MemoryConverterBitPerPixel {
 
 /// The memory converter supports rotating the written pixel data
 #[repr(u16)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum MemoryConverterRotation {
     /// dont rotate image
     Rotate0 = 0b00,
@@ -79,6 +79,18 @@ impl From<&Rotation> for MemoryConverterRotation {
             Rotation::Rotate90 => MemoryConverterRotation::Rotate90,
             Rotation::Rotate180 => MemoryConverterRotation::Rotate180,
             Rotation::Rotate270 => MemoryConverterRotation::Rotate270,
+        }
+    }
+}
+
+impl MemoryConverterBitPerPixel {
+    /// Return the number of bits per pixel
+    pub fn get_bits_per_pixel(self) -> u32 {
+        match self {
+            MemoryConverterBitPerPixel::BitsPerPixel2 => 2,
+            MemoryConverterBitPerPixel::BitsPerPixel3 => todo!(),
+            MemoryConverterBitPerPixel::BitsPerPixel4 => 4,
+            MemoryConverterBitPerPixel::BitsPerPixel8 => todo!(),
         }
     }
 }
