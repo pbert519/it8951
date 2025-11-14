@@ -799,7 +799,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
         let width = size.width as i32;
         let height = size.height as i32;
         for Pixel(coord, color) in pixels.into_iter() {
-            if (coord.x >= 0 && coord.x < width) || (coord.y >= 0 || coord.y < height) {
+            if (coord.x >= 0 && coord.x < width) && (coord.y >= 0 && coord.y < height) {
                 let raw_color = color.luma();
                 let data = [raw_color << 4 | raw_color, raw_color << 4 | raw_color];
 
@@ -838,5 +838,354 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> OriginDimensi
             Rotation::Rotate90 | Rotation::Rotate270 => (h, w),
         };
         Size::new(w, h)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec::Vec;
+
+    // Mock interface for testing
+    struct MockInterface {
+        commands: Vec<(u16, Vec<u16>)>,
+        timeout: core::time::Duration,
+    }
+
+    impl MockInterface {
+        fn new() -> Self {
+            MockInterface {
+                commands: Vec::new(),
+                timeout: core::time::Duration::from_secs(1),
+            }
+        }
+    }
+
+    impl interface::IT8951Interface for MockInterface {
+        fn set_busy_timeout(&mut self, timeout: core::time::Duration) {
+            self.timeout = timeout;
+        }
+
+        fn wait_while_busy(&mut self) -> Result<(), interface::Error> {
+            Ok(())
+        }
+
+        fn write_data(&mut self, _data: u16) -> Result<(), interface::Error> {
+            Ok(())
+        }
+
+        fn write_multi_data(&mut self, _data: &[u8]) -> Result<(), interface::Error> {
+            Ok(())
+        }
+
+        fn write_command(&mut self, cmd: u16) -> Result<(), interface::Error> {
+            self.commands.push((cmd, Vec::new()));
+            Ok(())
+        }
+
+        fn write_command_with_args(
+            &mut self,
+            cmd: u16,
+            args: &[u16],
+        ) -> Result<(), interface::Error> {
+            self.commands.push((cmd, args.to_vec()));
+            Ok(())
+        }
+
+        fn read_data(&mut self) -> Result<u16, interface::Error> {
+            Ok(0)
+        }
+
+        fn read_multi_data(&mut self, buf: &mut [u8]) -> Result<(), interface::Error> {
+            // Fill with mock data for dev info
+            if buf.len() >= 40 {
+                // panel_width = 1872 (0x0750)
+                buf[0] = 0x50;
+                buf[1] = 0x07;
+                // panel_height = 1404 (0x057C)
+                buf[2] = 0x7C;
+                buf[3] = 0x05;
+                // memory_address = 0x00001000
+                buf[4] = 0x00;
+                buf[5] = 0x10;
+                buf[6] = 0x00;
+                buf[7] = 0x00;
+            }
+            Ok(())
+        }
+
+        fn reset(&mut self) -> Result<(), interface::Error> {
+            Ok(())
+        }
+
+        fn delay(&mut self, _duration: core::time::Duration) -> Result<(), interface::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_rotate_area_info_rotate0() {
+        let mock = MockInterface::new();
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, Config::default());
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 75,
+        };
+
+        let rotated = driver.rotate_area_info(&area);
+
+        assert_eq!(rotated.area_x, 100);
+        assert_eq!(rotated.area_y, 200);
+        assert_eq!(rotated.area_w, 50);
+        assert_eq!(rotated.area_h, 75);
+    }
+
+    #[test]
+    fn test_rotate_area_info_rotate90() {
+        let mock = MockInterface::new();
+        let mut config = Config::default();
+        config.rotation = Rotation::Rotate90;
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, config);
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 75,
+        };
+
+        let rotated = driver.rotate_area_info(&area);
+
+        // Rotate90: (y, ph - w - x, h, w)
+        assert_eq!(rotated.area_x, 200);
+        assert_eq!(rotated.area_y, 1404 - 50 - 100);
+        assert_eq!(rotated.area_w, 75);
+        assert_eq!(rotated.area_h, 50);
+    }
+
+    #[test]
+    fn test_rotate_area_info_rotate180() {
+        let mock = MockInterface::new();
+        let mut config = Config::default();
+        config.rotation = Rotation::Rotate180;
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, config);
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 75,
+        };
+
+        let rotated = driver.rotate_area_info(&area);
+
+        // Rotate180: (pw - w - x, ph - h - y, w, h)
+        assert_eq!(rotated.area_x, 1872 - 50 - 100);
+        assert_eq!(rotated.area_y, 1404 - 75 - 200);
+        assert_eq!(rotated.area_w, 50);
+        assert_eq!(rotated.area_h, 75);
+    }
+
+    #[test]
+    fn test_rotate_area_info_rotate270() {
+        let mock = MockInterface::new();
+        let mut config = Config::default();
+        config.rotation = Rotation::Rotate270;
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, config);
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 75,
+        };
+
+        let rotated = driver.rotate_area_info(&area);
+
+        // Rotate270: (pw - h - y, x, h, w)
+        assert_eq!(rotated.area_x, 1872 - 75 - 200);
+        assert_eq!(rotated.area_y, 100);
+        assert_eq!(rotated.area_w, 75);
+        assert_eq!(rotated.area_h, 50);
+    }
+
+    #[test]
+    fn test_load_image_area_no_double_transform() {
+        let mock = MockInterface::new();
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, Config::default());
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 4,
+            area_h: 1,
+        };
+
+        let data = [0x00, 0x00, 0x00, 0x00];
+
+        let result =
+            driver.load_image_area(0x001236E0, MemoryConverterSetting::default(), &area, &data);
+
+        assert!(result.is_ok());
+
+        // Verify that the command was sent with original coordinates (no transformation)
+        let commands = &driver.interface.commands;
+        assert!(commands.iter().any(|(cmd, args)| {
+            *cmd == command::IT8951_TCON_LD_IMG_AREA &&
+            args.len() >= 5 &&
+            args[1] == 100 && // area_x unchanged
+            args[2] == 200 && // area_y unchanged
+            args[3] == 4 &&   // area_w unchanged
+            args[4] == 1 // area_h unchanged
+        }));
+    }
+
+    #[test]
+    fn test_display_area_applies_rotation_once() {
+        let mock = MockInterface::new();
+        let mut config = Config::default();
+        config.rotation = Rotation::Rotate180;
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, config);
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 75,
+        };
+
+        let result = driver.display_area(&area, WaveformMode::GL16);
+        assert!(result.is_ok());
+
+        // Verify rotation was applied in display_area
+        let commands = &driver.interface.commands;
+        assert!(commands.iter().any(|(cmd, args)| {
+            *cmd == command::USDEF_I80_CMD_DPY_AREA &&
+            args.len() >= 5 &&
+            args[0] == 1872 - 50 - 100 && // rotated x
+            args[1] == 1404 - 75 - 200 && // rotated y
+            args[2] == 50 &&              // w unchanged for 180
+            args[3] == 75 // h unchanged for 180
+        }));
+    }
+
+    #[test]
+    fn test_bounds_checking_filters_out_of_bounds() {
+        // Test that draw_iter properly filters out-of-bounds pixels
+        let mock = MockInterface::new();
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, Config::default());
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 100,
+            panel_height: 100,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let pixels = vec![
+            Pixel(Point::new(50, 50), Gray4::WHITE),  // Valid
+            Pixel(Point::new(-1, 50), Gray4::WHITE),  // Invalid: x < 0
+            Pixel(Point::new(50, -1), Gray4::WHITE),  // Invalid: y < 0
+            Pixel(Point::new(100, 50), Gray4::WHITE), // Invalid: x >= width
+            Pixel(Point::new(50, 100), Gray4::WHITE), // Invalid: y >= height
+            Pixel(Point::new(99, 99), Gray4::WHITE),  // Valid: edge case
+        ];
+
+        let result = driver.draw_iter(pixels);
+        assert!(result.is_ok());
+
+        // Count load_image_area calls - should only be 2 (for valid pixels)
+        let load_commands = driver
+            .interface
+            .commands
+            .iter()
+            .filter(|(cmd, _)| *cmd == command::IT8951_TCON_LD_IMG_AREA)
+            .count();
+
+        assert_eq!(load_commands, 2, "Only 2 valid pixels should be drawn");
+    }
+
+    #[test]
+    fn test_area_img_info_at_display_edges() {
+        let mock = MockInterface::new();
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, Config::default());
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        // Test area at top-left corner
+        let area = AreaImgInfo {
+            area_x: 0,
+            area_y: 0,
+            area_w: 10,
+            area_h: 10,
+        };
+        assert!(driver.display_area(&area, WaveformMode::GL16).is_ok());
+
+        // Test area at bottom-right corner
+        let area = AreaImgInfo {
+            area_x: 1862,
+            area_y: 1394,
+            area_w: 10,
+            area_h: 10,
+        };
+        assert!(driver.display_area(&area, WaveformMode::GL16).is_ok());
     }
 }
