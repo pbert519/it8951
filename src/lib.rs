@@ -350,13 +350,12 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         &mut self,
         target_mem_addr: u32,
         image_settings: TMemoryConverterSetting,
-        area_info: &mut AreaImgInfo,
+        area_info: &AreaImgInfo,
         data: &[u8],
     ) -> Result<(), Error> {
         // Note that area_info does not need to be rotated here, as controller hw will do the rotation
         self.set_target_memory_addr(target_mem_addr)?;
 
-        TOrigin::transform(area_info, self.dev_info.as_ref().unwrap());
         self.interface.write_command_with_args(
             command::IT8951_TCON_LD_IMG_AREA,
             &[
@@ -731,14 +730,14 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
             .map(|d| d.memory_address)
             .expect("Dev info not initialized");
 
-        for (mut area_img_info, buffer) in area_iter {
+        for (area_img_info, buffer) in area_iter {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &mut area_img_info,
+                &area_img_info,
                 buffer,
             )?;
         }
@@ -767,7 +766,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
             self.config.max_buffer_size,
         );
 
-        for (mut area_img_info, buffer) in pixel {
+        for (area_img_info, buffer) in pixel {
             self.load_image_area(
                 memory_address,
                 MemoryConverterSetting {
@@ -775,7 +774,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
                     rotation: (&self.config.rotation).into(),
                     ..Default::default()
                 },
-                &mut area_img_info,
+                &area_img_info,
                 &buffer,
             )?;
         }
@@ -809,7 +808,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
                         rotation: (&self.config.rotation).into(),
                         ..Default::default()
                     },
-                    &mut AreaImgInfo {
+                    &AreaImgInfo {
                         area_x: coord.x as u16,
                         area_y: coord.y as u16,
                         area_w: 1,
@@ -1045,9 +1044,13 @@ mod tests {
     }
 
     #[test]
-    fn test_load_image_area_no_double_transform() {
+    fn test_load_image_area_no_transform_with_rotation() {
+        // This test verifies that load_image_area does NOT apply coordinate transformation
+        // even when rotation is enabled. The transformation should only happen in display_area.
         let mock = MockInterface::new();
-        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, Config::default());
+        let mut config = Config::default();
+        config.rotation = Rotation::Rotate180; // Enable rotation
+        let driver = IT8951::<_, origin::OriginTopLeft, Off>::new(mock, config);
         let mut driver = driver.into_state::<Run>();
         driver.dev_info = Some(DevInfo {
             panel_width: 1872,
@@ -1071,16 +1074,72 @@ mod tests {
 
         assert!(result.is_ok());
 
-        // Verify that the command was sent with original coordinates (no transformation)
+        // Verify that the command was sent with UNTRANSFORMED coordinates
+        // Even though rotation is Rotate180, load_image_area should NOT transform
+        // (The old buggy code would have transformed these to: x=1722, y=1129)
         let commands = &driver.interface.commands;
-        assert!(commands.iter().any(|(cmd, args)| {
-            *cmd == command::IT8951_TCON_LD_IMG_AREA &&
+        assert!(
+            commands.iter().any(|(cmd, args)| {
+                *cmd == command::IT8951_TCON_LD_IMG_AREA &&
             args.len() >= 5 &&
-            args[1] == 100 && // area_x unchanged
-            args[2] == 200 && // area_y unchanged
+            args[1] == 100 && // area_x unchanged (NOT 1722)
+            args[2] == 200 && // area_y unchanged (NOT 1129)
             args[3] == 4 &&   // area_w unchanged
             args[4] == 1 // area_h unchanged
-        }));
+            }),
+            "load_image_area should NOT transform coordinates even with rotation enabled"
+        );
+    }
+
+    #[test]
+    fn test_load_image_area_no_origin_transform() {
+        // This test verifies that load_image_area does NOT apply TOrigin transformation
+        // The old buggy code called TOrigin::transform in load_image_area, which would
+        // flip coordinates for OriginTopRight, causing double transformation
+        let mock = MockInterface::new();
+        let driver = IT8951::<_, origin::OriginTopRight, Off>::new_with_origin(
+            mock,
+            Config::default(),
+            origin::OriginTopRight {},
+        );
+        let mut driver = driver.into_state::<Run>();
+        driver.dev_info = Some(DevInfo {
+            panel_width: 1872,
+            panel_height: 1404,
+            memory_address: 0x001236E0,
+            firmware_version: String::from("test"),
+            lut_version: String::from("test"),
+        });
+
+        let area = AreaImgInfo {
+            area_x: 100,
+            area_y: 200,
+            area_w: 50,
+            area_h: 1,
+        };
+
+        let data = [0x00; 100];
+
+        let result =
+            driver.load_image_area(0x001236E0, MemoryConverterSetting::default(), &area, &data);
+
+        assert!(result.is_ok());
+
+        // Verify that coordinates were NOT transformed by TOrigin
+        // With OriginTopRight, the old buggy code would have transformed:
+        // area_x from 100 to (1872 - 50 - 100) = 1722
+        let commands = &driver.interface.commands;
+        assert!(
+            commands.iter().any(|(cmd, args)| {
+                *cmd == command::IT8951_TCON_LD_IMG_AREA
+                    && args.len() >= 5
+                    && args[1] == 100 // area_x unchanged (NOT 1722)
+                    && args[2] == 200 // area_y unchanged
+                    && args[3] == 50 // area_w unchanged
+                    && args[4] == 1 // area_h unchanged
+            }),
+            "load_image_area should NOT apply TOrigin transformation"
+        );
     }
 
     #[test]
