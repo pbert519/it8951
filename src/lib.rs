@@ -5,23 +5,29 @@
 //! The implementation is based on the IT8951 I80/SPI/I2C programming guide
 //! provided by waveshare: https://www.waveshare.com/wiki/7.8inch_e-Paper_HAT
 
+#[cfg(feature = "alloc")]
 #[macro_use]
 extern crate alloc;
 
-use alloc::string::String;
 use core::{borrow::Borrow, marker::PhantomData};
+use heapless::String;
 
+#[cfg(feature = "alloc")]
 mod area_serializer;
 mod command;
 pub mod interface;
 pub mod memory_converter_settings;
 pub mod origin;
+#[cfg(feature = "alloc")]
 mod pixel_serializer;
 mod register;
+#[cfg(feature = "alloc")]
 mod serialization_helper;
 
+#[cfg(feature = "alloc")]
 use area_serializer::{AreaSerializer, AreaSerializerIterator};
 use memory_converter_settings::MemoryConverterSetting;
+#[cfg(feature = "alloc")]
 use pixel_serializer::{convert_color_to_pixel_iterator, PixelSerializer};
 
 #[cfg(feature = "defmt")]
@@ -78,11 +84,11 @@ pub struct DevInfo {
     /// start address of the frame buffer in the controller ram
     pub memory_address: u32,
     /// Controller firmware version
-    pub firmware_version: String,
+    pub firmware_version: String<16>,
     /// LUT version
     /// The lut describes the waveforms to modify the display content
     /// LUT is specific for every display
-    pub lut_version: String,
+    pub lut_version: String<16>,
 }
 
 /// Describes a area on the display
@@ -589,7 +595,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
             panel_height: u16::from_be_bytes([buf[3], buf[2]]),
             memory_address: u32::from_be_bytes([buf[7], buf[6], buf[5], buf[4]]),
             firmware_version: Self::buf_to_str(&buf[8..24]),
-            lut_version: Self::buf_to_str(&buf[25..40]),
+            lut_version: Self::buf_to_str(&buf[24..40]),
         })
     }
 
@@ -603,7 +609,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         }
     }
 
-    fn buf_to_str(buffer: &[u8]) -> String {
+    fn buf_to_str<const N: usize>(buffer: &[u8]) -> String<N> {
         String::from_iter(
             buffer
                 .iter()
@@ -714,6 +720,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
         )
     }
 
+    #[cfg(feature = "alloc")]
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         // only update visible content
         let area = area.intersection(&self.bounding_box());
@@ -748,6 +755,7 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin> DrawTarget
         Ok(())
     }
 
+    #[cfg(feature = "alloc")]
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Color>,

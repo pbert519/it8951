@@ -21,6 +21,10 @@ jobs:
         rust:
           - stable
           - nightly
+        features:
+          - '--no-default-features'
+          - ''
+          - '--all-features'
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -31,7 +35,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target=${{ matrix.target }}
+          args: --release ${{ matrix.features }} --target=${{ matrix.target }}
 
   test:
     name: Test Suite
