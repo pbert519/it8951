@@ -46,9 +46,10 @@ We are currently discussing approaches without alloc. If you have any opinion on
 
 ## Changelog
 
-### Unreleased
+### 0.5.0
 - Add optional defmt support
 - Add display origin support (fixes mirroring on certain devices)
+- Allow setting memory buffer address
 
 ### 0.4.2
 - add display rotation support
