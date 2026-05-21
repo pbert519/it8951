@@ -292,6 +292,13 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         self.dev_info.clone().unwrap()
     }
 
+    /// Overwrites the reported default buffer address reported by the it8951
+    pub fn overwrite_default_buffer_address(&mut self, address: u32) {
+        if let Some(dev_info) = &mut self.dev_info {
+            dev_info.memory_address = address;
+        }
+    }
+
     /// Increases the driver strength
     /// Use only if the image is not clear!
     pub fn enhance_driving_capability(&mut self) -> Result<(), Error> {
