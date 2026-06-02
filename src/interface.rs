@@ -70,7 +70,7 @@ pub trait IT8951Interface {
 pub struct IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
     spi: SPI,
     busy: BUSY,
-    rst: RST,
+    rst: Option<RST>,
     delay: DELAY,
     timeout: core::time::Duration,
 }
@@ -92,7 +92,23 @@ where
         IT8951SPIInterface {
             spi,
             busy,
-            rst,
+            rst: Some(rst),
+            delay,
+            timeout: core::time::Duration::from_secs(1),
+        }
+    }
+
+    /// Create a new spi controller interface when the reset pin of the IT8951 is not connected
+    /// to a GPIO pin of the microcontroller (as in for example the M5 Paper)
+    pub fn new_no_rst(
+        spi: SPI,
+        busy: BUSY,
+        delay: DELAY,
+    ) -> IT8951SPIInterface<SPI, BUSY, RST, DELAY> {
+        IT8951SPIInterface {
+            spi,
+            busy,
+            rst: None,
             delay,
             timeout: core::time::Duration::from_secs(1),
         }
@@ -249,21 +265,25 @@ where
     }
 
     fn reset(&mut self) -> Result<(), Error> {
-        if self.rst.set_high().is_err() {
+        // If reset pin was not setup we just do nothing here
+        let Some(rst) = self.rst.as_mut() else {
+            return Ok(());
+        };
+        if rst.set_high().is_err() {
             #[cfg(feature = "defmt")]
             defmt::warn!("IO Error while resetting");
 
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(200);
-        if self.rst.set_low().is_err() {
+        if rst.set_low().is_err() {
             #[cfg(feature = "defmt")]
             defmt::warn!("IO Error while resetting");
 
             return Err(Error::GPIOError);
         }
         self.delay.delay_ms(20);
-        if self.rst.set_high().is_err() {
+        if rst.set_high().is_err() {
             #[cfg(feature = "defmt")]
             defmt::warn!("IO Error while resetting");
 
