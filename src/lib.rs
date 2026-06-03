@@ -216,15 +216,8 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     /// Initalize the driver and resets the display
     /// VCOM should be given on your display
     /// Since version 0.4.0, this function no longer resets the display
-    pub fn init(mut self, vcom: u16) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
-        self.interface.reset()?;
-
-        let mut it8951 = self.into_state::<PowerDown>().sys_run()?;
-
-        let dev_info = it8951.get_system_info()?;
-
-        // Enable Pack Write
-        it8951.write_register(register::I80CPCR, 0x0001)?;
+    pub fn init(self, vcom: u16) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
+        let mut it8951 = self.init_no_vcom()?;
 
         let current_vcom = it8951.get_vcom()?;
         if vcom != current_vcom {
@@ -233,6 +226,27 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
 
             it8951.set_vcom(vcom)?;
         }
+        Ok(it8951)
+    }
+
+    /// Initalize the driver and resets the display without setting VCOM
+    /// 
+    /// Use only in case where VCOM is set automatically by the IT8951.
+    /// Apparently this only tends to be done where the display and the IT8951
+    /// are shipped as one module and the VCOM calibration is stored at the factory
+    /// in OTP (one time programmable) memory.
+    /// 
+    /// Verify this by reading VCOM after calling init_no_vcom and see that it has
+    /// a sensible value (e.g. not 0x0000 or 0xFFFF)
+    pub fn init_no_vcom(mut self) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
+        self.interface.reset()?;
+
+        let mut it8951 = self.into_state::<PowerDown>().sys_run()?;
+
+        let dev_info = it8951.get_system_info()?;
+
+        // Enable Pack Write
+        it8951.write_register(register::I80CPCR, 0x0001)?;
 
         #[cfg(feature = "defmt")]
         defmt::info!(
