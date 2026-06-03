@@ -230,12 +230,12 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
     }
 
     /// Initalize the driver and resets the display without setting VCOM
-    /// 
+    ///
     /// Use only in case where VCOM is set automatically by the IT8951.
     /// Apparently this only tends to be done where the display and the IT8951
     /// are shipped as one module and the VCOM calibration is stored at the factory
     /// in OTP (one time programmable) memory.
-    /// 
+    ///
     /// Verify this by reading VCOM after calling init_no_vcom and see that it has
     /// a sensible value (e.g. not 0x0000 or 0xFFFF)
     pub fn init_no_vcom(mut self) -> Result<IT8951<IT8951Interface, TOrigin, Run>, Error> {
@@ -633,7 +633,10 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         )
     }
 
-    fn get_vcom(&mut self) -> Result<u16, Error> {
+    /// Get the current VCOM setting for the panel
+    /// This should normally be set at initialising either by passing a value to init
+    /// or will be loaded automatically by the IT8951 from OTP (one time programmable memory)
+    pub fn get_vcom(&mut self) -> Result<u16, Error> {
         self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0000)?;
         let vcom = self.interface.read_data()?;
@@ -644,7 +647,10 @@ impl<IT8951Interface: interface::IT8951Interface, TOrigin: Origin>
         Ok(vcom)
     }
 
-    fn set_vcom(&mut self, vcom: u16) -> Result<(), Error> {
+    /// Sets the VCOM for the panel
+    /// Set this with extreme caution. Using the wrong value can damage your panel. This will normally
+    /// be set during initialising.
+    pub fn set_vcom(&mut self, vcom: u16) -> Result<(), Error> {
         self.interface.write_command(command::USDEF_I80_CMD_VCOM)?;
         self.interface.write_data(0x0001)?;
         self.interface.write_data(vcom)?;
