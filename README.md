@@ -46,6 +46,10 @@ We are currently discussing approaches without alloc. If you have any opinion on
 
 ## Changelog
 
+### 0.5.1
+- Reset pin is optional
+- VCOM during init is optional
+
 ### 0.5.0
 - Add optional defmt support
 - Add display origin support (fixes mirroring on certain devices)
